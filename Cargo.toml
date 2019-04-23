@@ -9,3 +9,8 @@ runtime = "0.3.0-alpha.1"
 runtime-attributes = "0.3.0-alpha.1"
 runtime-raw = "0.3.0-alpha.1"
 runtime-native = "0.3.0-alpha.1"
+tokio = "0.1"
+futures-preview = { version = "0.3.0-alpha.14", features = ["compat"] }
+futures-util = "0.2"
+failure = "0.1"
+futures01 = { package = "futures", version = "0.1" }
