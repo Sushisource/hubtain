@@ -14,3 +14,5 @@ futures-preview = { version = "0.3.0-alpha.14", features = ["compat"] }
 futures-util = "0.2"
 failure = "0.1"
 futures01 = { package = "futures", version = "0.1" }
+serde = "1.0"
+bincode = "1.1"
