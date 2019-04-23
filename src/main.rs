@@ -1,25 +1,25 @@
 #![feature(async_await, await_macro, futures_api)]
 
+use bincode::serialize;
 use failure::Error;
 use futures01::Future as Future01;
 use runtime::net::{TcpListener, UdpSocket};
+use runtime::spawn;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 use tokio::timer::Delay;
-use bincode::serialize;
-use runtime::spawn;
 
 #[runtime::main]
 async fn main() -> Result<(), Error> {
-    await!(serve())?;
+    let tcp_sock = TcpListener::bind("127.0.0.1:0")?;
+    let udp_sock = UdpSocket::bind("127.0.0.1:42444")?;
+    await!(serve(tcp_sock, udp_sock))?;
     Ok(())
 }
 
-async fn serve() -> Result<(), Error> {
-    let tcp_sock = TcpListener::bind("127.0.0.1:0")?;
+async fn serve(tcp_sock: TcpListener, mut socket: UdpSocket) -> Result<(), Error> {
     let tcp_port = tcp_sock.local_addr()?.port();
 
-    let mut socket = UdpSocket::bind("127.0.0.1:42444")?;
     socket.set_broadcast(true)?;
     println!("Listening on {}", socket.local_addr()?);
 
@@ -52,9 +52,12 @@ mod test {
 
     #[runtime::test]
     async fn peers_discover_each_other() {
-        spawn(serve());
+        let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
+        let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let udp_port = udp_sock.local_addr().unwrap().port();
+        spawn(serve(tcp_sock, udp_sock));
 
-        let broadcast_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 42444);
+        let broadcast_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), udp_port);
         let mut client_s = UdpSocket::bind("127.0.0.1:0").unwrap();
         client_s.set_broadcast(true).unwrap();
         let mut buf = vec![0u8; 24];
