@@ -3,11 +3,16 @@
 use bincode::serialize;
 use failure::Error;
 use futures01::Future as Future01;
-use runtime::net::{TcpListener, UdpSocket};
-use runtime::spawn;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::{Duration, Instant};
+use runtime::{
+    net::{TcpListener, UdpSocket},
+    spawn
+};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::{Duration, Instant}
+};
 use tokio::timer::Delay;
+use futures::io::{AsyncWriteExt, AsyncReadExt};
 
 #[runtime::main]
 async fn main() -> Result<(), Error> {
@@ -40,8 +45,12 @@ async fn serve(tcp_sock: TcpListener, mut socket: UdpSocket) -> Result<(), Error
     }
 }
 
-async fn file_srv(mut tcp_sock: TcpListener) -> Result<(), Error> {
-    println!("TCP listening on {}", tcp_sock.local_addr()?);
+async fn file_srv(mut listener: TcpListener) -> Result<(), Error> {
+    println!("TCP listening on {}", listener.local_addr()?);
+    let sendme = b"I'm a big boi";
+    let (mut stream, addr) = await!(listener.accept())?;
+    println!("Accepted connection from {:?}", &addr);
+    await!(stream.write_all(sendme))?;
     Ok(())
 }
 
@@ -49,6 +58,7 @@ async fn file_srv(mut tcp_sock: TcpListener) -> Result<(), Error> {
 mod test {
     use super::*;
     use bincode::deserialize;
+    use runtime::net::tcp::TcpStream;
 
     #[runtime::test]
     async fn peers_discover_each_other() {
@@ -63,8 +73,14 @@ mod test {
         let mut buf = vec![0u8; 24];
         await!(client_s.send_to(b"I'm a client!", broadcast_addr)).unwrap();
         dbg!("ClientSent!");
-        await!(client_s.recv_from(&mut buf)).unwrap();
+        let (_, peer) = await!(client_s.recv_from(&mut buf)).unwrap();
         let tcp_port: u16 = deserialize(&buf).unwrap();
         println!("Client found server tcp port {}", &tcp_port);
+        let mut tcp_sock_addr = peer;
+        tcp_sock_addr.set_port(tcp_port);
+        // Connect to the tcp port
+        let mut stream = await!(TcpStream::connect(tcp_sock_addr)).unwrap();
+        let read_bytes = await!(stream.read(&mut buf)).unwrap();
+        println!("Read {:?}", &buf);
     }
 }
