@@ -1,4 +1,4 @@
-#![feature(async_await, await_macro)]
+#![feature(async_await, await_macro, test)]
 
 mod client;
 mod filereader;
@@ -97,6 +97,29 @@ mod test {
 
         let mut test_dat = vec![];
         File::open("testdata/small.txt").unwrap().read_to_end(&mut test_dat).unwrap();
+        assert_eq!(content, test_dat);
+    }
+
+    #[cfg(expensive_tests)]
+    #[runtime::test]
+    async fn large_file_transfer() {
+        let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
+        let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let udp_port = udp_sock.local_addr().unwrap().port();
+        let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
+        spawn(serve(tcp_sock, udp_sock, test_file));
+
+        let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
+        let start = Instant::now();
+        dbg!("Began transfer");
+        let content = await!(client.download_to_vec()).unwrap();
+        dbg!("Finished transfer after {:?}", start.elapsed());
+
+        let start = Instant::now();
+        dbg!("Loading file");
+        let mut test_dat = vec![];
+        File::open("testdata/large.bin").unwrap().read_to_end(&mut test_dat).unwrap();
+        dbg!("Done loading file after {:?}", start.elapsed());
         assert_eq!(content, test_dat);
     }
 }
