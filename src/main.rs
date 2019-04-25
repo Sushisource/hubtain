@@ -1,6 +1,7 @@
 #![feature(async_await, await_macro)]
 
 mod client;
+mod filereader;
 
 use bincode::serialize;
 use failure::Error;
@@ -47,7 +48,7 @@ async fn serve<T: 'static + AsyncRead + Send + Unpin>(
         await!(socket.send_to(&portnum, &peer))?;
 
         let sleep = Delay::new(Instant::now() + Duration::from_millis(300))
-            .map_err(|e| panic!("timer failed; err={:?}", e));
+          .map_err(|e| panic!("timer failed; err={:?}", e));
         tokio::run(sleep);
     }
 }
@@ -67,6 +68,9 @@ async fn data_srv<T: AsyncRead + Unpin>(
 mod test {
     use super::*;
     use crate::client::DownloadClient;
+    use crate::filereader::AsyncFileReader;
+    use std::fs::File;
+    use std::io::Read;
 
     #[runtime::test]
     async fn basic_transfer() {
@@ -78,5 +82,21 @@ mod test {
         let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
         let content = await!(client.download_to_vec()).unwrap();
         assert_eq!(content, TEST_DATA);
+    }
+
+    #[runtime::test]
+    async fn file_transfer() {
+        let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
+        let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let udp_port = udp_sock.local_addr().unwrap().port();
+        let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
+        spawn(serve(tcp_sock, udp_sock, test_file));
+
+        let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
+        let content = await!(client.download_to_vec()).unwrap();
+
+        let mut test_dat = vec![];
+        File::open("testdata/small.txt").unwrap().read_to_end(&mut test_dat).unwrap();
+        assert_eq!(content, test_dat);
     }
 }
