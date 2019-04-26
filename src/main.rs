@@ -9,13 +9,10 @@ mod filereader;
 use bincode::serialize;
 use failure::Error;
 use futures::io::{AsyncRead, AsyncReadExt};
-use futures01::Future as Future01;
 use runtime::{
     net::{TcpListener, UdpSocket},
     spawn,
 };
-use std::time::{Duration, Instant};
-use tokio::timer::Delay;
 
 static TEST_DATA: &[u8] = b"Hi I'm data";
 
@@ -47,16 +44,12 @@ async fn serve<T: 'static + AsyncRead + Send + Unpin + Clone>(
         // Reply with tcp portnum
         let portnum = serialize(&tcp_port)?;
         await!(socket.send_to(&portnum, &peer))?;
-
-        let sleep = Delay::new(Instant::now() + Duration::from_millis(300))
-            .map_err(|e| panic!("timer failed; err={:?}", e));
-        tokio::run(sleep);
     }
 }
 
 async fn data_srv<T: 'static + AsyncRead + Unpin + Send + Clone>(
     mut listener: TcpListener,
-    mut data_src: T,
+    data_src: T,
 ) -> Result<(), Error> {
     println!("TCP listening on {}", listener.local_addr()?);
     loop {
@@ -77,6 +70,7 @@ mod test {
     use crate::filereader::AsyncFileReader;
     use std::fs::File;
     use std::io::Read;
+    use std::time::Instant;
 
     #[runtime::test]
     async fn basic_transfer() {
@@ -117,21 +111,22 @@ mod test {
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
         spawn(serve(tcp_sock, udp_sock, test_file));
 
-        let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
-        let mut client2 = await!(DownloadClient::connect(udp_port)).unwrap();
-        let df1 = client.download_to_vec();
-        let df2 = client2.download_to_vec();
-        let (content, content2) = try_join!(df1, df2).unwrap();
+        let dl_futures = (1..100).map(async move |_| {
+            let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
+            await!(client.download_to_vec())
+        });
+        let contents = await!(futures::future::try_join_all(dl_futures)).unwrap();
 
         let mut test_dat = vec![];
         File::open("testdata/small.txt")
-          .unwrap()
-          .read_to_end(&mut test_dat)
-          .unwrap();
-        assert_eq!(content, test_dat);
-        assert_eq!(content2, test_dat);
-    }
+            .unwrap()
+            .read_to_end(&mut test_dat)
+            .unwrap();
 
+        for content in contents {
+            assert_eq!(content, test_dat);
+        }
+    }
 
     #[cfg(expensive_tests)]
     #[runtime::test]
