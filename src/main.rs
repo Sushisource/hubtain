@@ -1,5 +1,8 @@
 #![feature(async_await, await_macro, test)]
 
+#[macro_use]
+extern crate futures;
+
 mod client;
 mod filereader;
 
@@ -11,14 +14,12 @@ use runtime::{
     net::{TcpListener, UdpSocket},
     spawn,
 };
-use std::{
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tokio::timer::Delay;
 
 static TEST_DATA: &[u8] = b"Hi I'm data";
 
-#[runtime::main]
+#[runtime::main(runtime_tokio::Tokio)]
 async fn main() -> Result<(), Error> {
     let tcp_sock = TcpListener::bind("127.0.0.1:0")?;
     let udp_sock = UdpSocket::bind("127.0.0.1:42444")?;
@@ -26,7 +27,7 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn serve<T: 'static + AsyncRead + Send + Unpin>(
+async fn serve<T: 'static + AsyncRead + Send + Unpin + Clone>(
     tcp_sock: TcpListener,
     mut socket: UdpSocket,
     data_src: T,
@@ -48,20 +49,25 @@ async fn serve<T: 'static + AsyncRead + Send + Unpin>(
         await!(socket.send_to(&portnum, &peer))?;
 
         let sleep = Delay::new(Instant::now() + Duration::from_millis(300))
-          .map_err(|e| panic!("timer failed; err={:?}", e));
+            .map_err(|e| panic!("timer failed; err={:?}", e));
         tokio::run(sleep);
     }
 }
 
-async fn data_srv<T: AsyncRead + Unpin>(
+async fn data_srv<T: 'static + AsyncRead + Unpin + Send + Clone>(
     mut listener: TcpListener,
     mut data_src: T,
 ) -> Result<(), Error> {
     println!("TCP listening on {}", listener.local_addr()?);
-    let (mut stream, addr) = await!(listener.accept())?;
-    println!("Accepted connection from {:?}", &addr);
-    await!(data_src.copy_into(&mut stream))?;
-    Ok(())
+    loop {
+        let (mut stream, addr) = await!(listener.accept())?;
+        println!("Accepted connection from {:?}", &addr);
+        let mut data_src = data_src.clone();
+        spawn(async move {
+            dbg!("Copying!");
+            await!(data_src.copy_into(&mut stream))
+        });
+    }
 }
 
 #[cfg(test)]
@@ -85,7 +91,7 @@ mod test {
     }
 
     #[runtime::test]
-    async fn file_transfer() {
+    async fn small_file_transfer() {
         let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
@@ -96,9 +102,36 @@ mod test {
         let content = await!(client.download_to_vec()).unwrap();
 
         let mut test_dat = vec![];
-        File::open("testdata/small.txt").unwrap().read_to_end(&mut test_dat).unwrap();
+        File::open("testdata/small.txt")
+            .unwrap()
+            .read_to_end(&mut test_dat)
+            .unwrap();
         assert_eq!(content, test_dat);
     }
+
+    #[runtime::test]
+    async fn multiple_small_file_transfer() {
+        let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
+        let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let udp_port = udp_sock.local_addr().unwrap().port();
+        let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
+        spawn(serve(tcp_sock, udp_sock, test_file));
+
+        let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
+        let mut client2 = await!(DownloadClient::connect(udp_port)).unwrap();
+        let df1 = client.download_to_vec();
+        let df2 = client2.download_to_vec();
+        let (content, content2) = try_join!(df1, df2).unwrap();
+
+        let mut test_dat = vec![];
+        File::open("testdata/small.txt")
+          .unwrap()
+          .read_to_end(&mut test_dat)
+          .unwrap();
+        assert_eq!(content, test_dat);
+        assert_eq!(content2, test_dat);
+    }
+
 
     #[cfg(expensive_tests)]
     #[runtime::test]
@@ -118,7 +151,10 @@ mod test {
         let start = Instant::now();
         dbg!("Loading file");
         let mut test_dat = vec![];
-        File::open("testdata/large.bin").unwrap().read_to_end(&mut test_dat).unwrap();
+        File::open("testdata/large.bin")
+            .unwrap()
+            .read_to_end(&mut test_dat)
+            .unwrap();
         dbg!("Done loading file after {:?}", start.elapsed());
         assert_eq!(content, test_dat);
     }
