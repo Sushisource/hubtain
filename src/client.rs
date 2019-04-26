@@ -1,9 +1,10 @@
+use crate::filewriter::AsyncFileWriter;
 use bincode::deserialize;
 use failure::Error;
 use futures::io::AsyncReadExt;
 use runtime::net::{TcpStream, UdpSocket};
-use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 
 pub struct DownloadClient {
     stream: TcpStream,
@@ -27,9 +28,16 @@ impl DownloadClient {
         Ok(DownloadClient { stream })
     }
 
+    pub async fn download_to_file(&mut self, path: PathBuf) -> Result<(), Error> {
+        println!("Starting download!");
+        let mut as_fwriter = AsyncFileWriter::new(path.as_path())?;
+        await!(self.stream.copy_into(&mut as_fwriter))?;
+        Ok(())
+    }
+
     #[cfg(test)]
-    pub async fn download_to_vec(&mut self) -> io::Result<Vec<u8>> {
-        dbg!("Starting download!");
+    pub async fn download_to_vec(&mut self) -> std::io::Result<Vec<u8>> {
+        println!("Starting download!");
         let mut download = Vec::with_capacity(2056);
         await!(self.stream.read_to_end(&mut download))?;
         Ok(download)

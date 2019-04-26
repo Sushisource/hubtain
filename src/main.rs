@@ -5,6 +5,7 @@ extern crate futures;
 
 mod client;
 mod filereader;
+mod filewriter;
 
 use bincode::serialize;
 use failure::Error;
@@ -85,7 +86,7 @@ mod test {
     }
 
     #[runtime::test]
-    async fn small_file_transfer() {
+    async fn single_small_file_transfer() {
         let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
@@ -93,14 +94,20 @@ mod test {
         spawn(serve(tcp_sock, udp_sock, test_file));
 
         let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
-        let content = await!(client.download_to_vec()).unwrap();
+        await!(client.download_to_file("testdata/tmp.small.txt".into())).unwrap();
 
-        let mut test_dat = vec![];
+        let mut expected_dat = vec![];
         File::open("testdata/small.txt")
             .unwrap()
-            .read_to_end(&mut test_dat)
+            .read_to_end(&mut expected_dat)
             .unwrap();
-        assert_eq!(content, test_dat);
+        let mut test_dat = vec![];
+        File::open("testdata/tmp.small.txt")
+          .unwrap()
+          .read_to_end(&mut test_dat)
+          .unwrap();
+        assert_eq!(expected_dat, test_dat);
+        std::fs::remove_file("testdata/tmp.small.txt").unwrap();
     }
 
     #[runtime::test]
