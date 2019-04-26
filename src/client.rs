@@ -2,6 +2,7 @@ use bincode::deserialize;
 use failure::Error;
 use futures::io::AsyncReadExt;
 use runtime::net::{TcpStream, UdpSocket};
+use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 pub struct DownloadClient {
@@ -27,7 +28,8 @@ impl DownloadClient {
     }
 
     #[cfg(test)]
-    pub async fn download_to_vec(&mut self) -> Result<Vec<u8>, Error> {
+    pub async fn download_to_vec(&mut self) -> io::Result<Vec<u8>> {
+        dbg!("Starting download!");
         let mut download = Vec::with_capacity(2056);
         await!(self.stream.read_to_end(&mut download))?;
         Ok(download)
