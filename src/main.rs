@@ -11,6 +11,8 @@ mod client;
 mod filereader;
 mod filewriter;
 
+use crate::client::DownloadClient;
+use crate::filereader::AsyncFileReader;
 use bincode::serialize;
 use clap::AppSettings;
 use failure::Error;
@@ -19,9 +21,6 @@ use runtime::{
     net::{TcpListener, UdpSocket},
     spawn,
 };
-use crate::client::DownloadClient;
-
-static TEST_DATA: &[u8] = b"Hi I'm data";
 
 #[runtime::main(runtime_tokio::Tokio)]
 async fn main() -> Result<(), Error> {
@@ -31,6 +30,7 @@ async fn main() -> Result<(), Error> {
         (about: "Simple local file transfer server and client")
         (@subcommand srv =>
             (about: "Server mode")
+            (@arg FILE: +required "The file to serve")
         )
         (@subcommand fetch =>
             (about: "Client download mode")
@@ -39,15 +39,19 @@ async fn main() -> Result<(), Error> {
     .setting(AppSettings::SubcommandRequiredElseHelp)
     .get_matches();
     match matches.subcommand() {
-        ("srv", Some(_)) => {
+        ("srv", Some(sc)) => {
             let tcp_sock = TcpListener::bind("127.0.0.1:0")?;
             let udp_sock = UdpSocket::bind("127.0.0.1:42444")?;
-            await!(serve(tcp_sock, udp_sock, TEST_DATA))?;
+            let file_path = sc.value_of("FILE").unwrap();
+            println!("Serving file {}", &file_path);
+            let serv_file = AsyncFileReader::new(file_path)?;
+            await!(serve(tcp_sock, udp_sock, serv_file))?;
         }
         ("fetch", Some(_)) => {
-            let mut _client = await!(DownloadClient::connect(42444)).unwrap();
+            let mut client = await!(DownloadClient::connect(42444)).unwrap();
+            await!(client.download_to_file("download".into())).unwrap();
         }
-        _ => bail!("Unmatched subcommand")
+        _ => bail!("Unmatched subcommand"),
     }
     Ok(())
 }
@@ -98,6 +102,7 @@ mod test {
     use std::fs::File;
     use std::io::Read;
     use std::time::Instant;
+    static TEST_DATA: &[u8] = b"Hi I'm data";
 
     #[runtime::test]
     async fn basic_transfer() {
