@@ -2,26 +2,53 @@
 
 #[macro_use]
 extern crate futures;
+#[macro_use]
+extern crate clap;
+#[macro_use]
+extern crate failure;
 
 mod client;
 mod filereader;
 mod filewriter;
 
 use bincode::serialize;
+use clap::AppSettings;
 use failure::Error;
 use futures::io::{AsyncRead, AsyncReadExt};
 use runtime::{
     net::{TcpListener, UdpSocket},
     spawn,
 };
+use crate::client::DownloadClient;
 
 static TEST_DATA: &[u8] = b"Hi I'm data";
 
 #[runtime::main(runtime_tokio::Tokio)]
 async fn main() -> Result<(), Error> {
-    let tcp_sock = TcpListener::bind("127.0.0.1:0")?;
-    let udp_sock = UdpSocket::bind("127.0.0.1:42444")?;
-    await!(serve(tcp_sock, udp_sock, TEST_DATA))?;
+    let matches = clap_app!(myapp =>
+        (version: "0.1")
+        (author: "Spencer Judge")
+        (about: "Simple local file transfer server and client")
+        (@subcommand srv =>
+            (about: "Server mode")
+        )
+        (@subcommand fetch =>
+            (about: "Client download mode")
+        )
+    )
+    .setting(AppSettings::SubcommandRequiredElseHelp)
+    .get_matches();
+    match matches.subcommand() {
+        ("srv", Some(_)) => {
+            let tcp_sock = TcpListener::bind("127.0.0.1:0")?;
+            let udp_sock = UdpSocket::bind("127.0.0.1:42444")?;
+            await!(serve(tcp_sock, udp_sock, TEST_DATA))?;
+        }
+        ("fetch", Some(_)) => {
+            let mut _client = await!(DownloadClient::connect(42444)).unwrap();
+        }
+        _ => bail!("Unmatched subcommand")
+    }
     Ok(())
 }
 
@@ -67,7 +94,6 @@ async fn data_srv<T: 'static + AsyncRead + Unpin + Send + Clone>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::client::DownloadClient;
     use crate::filereader::AsyncFileReader;
     use std::fs::File;
     use std::io::Read;
@@ -103,9 +129,9 @@ mod test {
             .unwrap();
         let mut test_dat = vec![];
         File::open("testdata/tmp.small.txt")
-          .unwrap()
-          .read_to_end(&mut test_dat)
-          .unwrap();
+            .unwrap()
+            .read_to_end(&mut test_dat)
+            .unwrap();
         assert_eq!(expected_dat, test_dat);
         std::fs::remove_file("testdata/tmp.small.txt").unwrap();
     }

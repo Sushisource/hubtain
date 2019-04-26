@@ -5,6 +5,7 @@ authors = ["Spencer Judge <spencer@xand.me>"]
 edition = "2018"
 
 [dependencies]
+clap = "2"
 runtime = "0.3.0-alpha.1"
 runtime-attributes = "0.3.0-alpha.1"
 runtime-raw = "0.3.0-alpha.1"
