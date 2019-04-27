@@ -1,6 +1,5 @@
 #![feature(async_await, await_macro, test)]
 
-#[macro_use]
 extern crate futures;
 #[macro_use]
 extern crate clap;
@@ -22,7 +21,7 @@ use runtime::{
     spawn,
 };
 
-#[runtime::main(runtime_tokio::Tokio)]
+#[runtime::main]
 async fn main() -> Result<(), Error> {
     let matches = clap_app!(myapp =>
         (version: "0.1")
