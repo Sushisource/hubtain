@@ -23,7 +23,7 @@ use runtime::{
 
 #[runtime::main]
 async fn main() -> Result<(), Error> {
-    let matches = clap_app!(myapp =>
+    let matches = clap_app!(hubtain =>
         (version: "0.1")
         (author: "Spencer Judge")
         (about: "Simple local file transfer server and client")
@@ -39,8 +39,8 @@ async fn main() -> Result<(), Error> {
     .get_matches();
     match matches.subcommand() {
         ("srv", Some(sc)) => {
-            let tcp_sock = TcpListener::bind("127.0.0.1:0")?;
-            let udp_sock = UdpSocket::bind("127.0.0.1:42444")?;
+            let tcp_sock = TcpListener::bind("0.0.0.0:0")?;
+            let udp_sock = UdpSocket::bind("192.168.0.255:42444")?;
             let file_path = sc.value_of("FILE").unwrap();
             println!("Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
@@ -63,7 +63,7 @@ async fn serve<T: 'static + AsyncRead + Send + Unpin + Clone>(
     let tcp_port = tcp_sock.local_addr()?.port();
 
     socket.set_broadcast(true)?;
-    println!("Listening on {}", socket.local_addr()?);
+    println!("UDP Listening on {}", socket.local_addr()?);
 
     spawn(data_srv(tcp_sock, data_src));
 
@@ -88,7 +88,7 @@ async fn data_srv<T: 'static + AsyncRead + Unpin + Send + Clone>(
         println!("Accepted connection from {:?}", &addr);
         let mut data_src = data_src.clone();
         spawn(async move {
-            dbg!("Copying!");
+            println!("Copying data to stream!");
             await!(data_src.copy_into(&mut stream))
         });
     }
