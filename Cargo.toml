@@ -18,6 +18,9 @@ failure = "0.1"
 futures01 = { package = "futures", version = "0.1" }
 serde = "1.0"
 bincode = "1.1"
+log = "0.4.0"
+env_logger = "0.6.1"
+colored = "1"
 
 [features]
 expensive_tests = []
