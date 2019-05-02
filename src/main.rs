@@ -65,8 +65,8 @@ async fn main() -> Result<(), Error> {
             await!(serve(tcp_sock, udp_sock, serv_file))?;
         }
         ("fetch", Some(_)) => {
-            let mut client = await!(DownloadClient::connect(42444)).unwrap();
-            await!(client.download_to_file("download".into())).unwrap();
+            let mut client = await!(DownloadClient::connect(42444))?;
+            await!(client.download_to_file("download".into()))?;
         }
         _ => bail!("Unmatched subcommand"),
     }
