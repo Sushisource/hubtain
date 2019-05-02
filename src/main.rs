@@ -25,6 +25,7 @@ use runtime::{
 use log::LevelFilter;
 use colored::Colorize;
 
+
 #[runtime::main]
 async fn main() -> Result<(), Error> {
     env_logger::Builder::from_default_env().filter_level(LevelFilter::Info).init();
@@ -37,7 +38,7 @@ async fn main() -> Result<(), Error> {
     | | | | |_| | |_) | || (_| | | | | |
     |_| |_|\__,_|_.__/ \__\__,_|_|_| |_|
 
-      local file transfers made {}
+       local file transfers made {}
 
     "#, "easy".green());
 
@@ -58,7 +59,7 @@ async fn main() -> Result<(), Error> {
     match matches.subcommand() {
         ("srv", Some(sc)) => {
             let tcp_sock = TcpListener::bind("0.0.0.0:0")?;
-            let udp_sock = UdpSocket::bind("192.168.0.255:42444")?;
+            let udp_sock = UdpSocket::bind(udp_srv_bind_addr(42444))?;
             let file_path = sc.value_of("FILE").unwrap();
             info!("Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
@@ -110,6 +111,11 @@ async fn data_srv<T: 'static + AsyncRead + Unpin + Send + Clone>(
             await!(data_src.copy_into(&mut stream))
         });
     }
+}
+
+#[cfg(target_family = "windows")]
+fn udp_srv_bind_addr(port_num: usize) -> String {
+    format!("0.0.0.0:{}", port_num)
 }
 
 #[cfg(test)]
