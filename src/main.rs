@@ -28,6 +28,7 @@ use runtime::{
 use slog::Drain;
 use std::net::{IpAddr, Ipv4Addr};
 
+#[cfg(not(test))]
 lazy_static! {
     static ref LOG: slog::Logger = {
         let decorator = slog_term::TermDecorator::new().build();
@@ -35,13 +36,17 @@ lazy_static! {
         let drain = slog_async::Async::new(drain).build().fuse();
         slog::Logger::root(drain, o!())
     };
-}
-#[cfg(not(test))]
-lazy_static! {
     static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(192, 168, 0, 255)) };
 }
+
 #[cfg(test)]
 lazy_static! {
+    static ref LOG: slog::Logger = {
+        let decorator = slog_term::PlainDecorator::new(slog_term::TestStdoutWriter);
+        let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        slog::Logger::root(drain, o!())
+    };
     static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)) };
 }
 
