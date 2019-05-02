@@ -6,7 +6,9 @@ extern crate clap;
 #[macro_use]
 extern crate failure;
 #[macro_use]
-extern crate log;
+extern crate slog;
+#[macro_use]
+extern crate lazy_static;
 
 mod client;
 mod filereader;
@@ -16,22 +18,30 @@ use crate::client::DownloadClient;
 use crate::filereader::AsyncFileReader;
 use bincode::serialize;
 use clap::AppSettings;
+use colored::Colorize;
 use failure::Error;
 use futures::io::{AsyncRead, AsyncReadExt};
 use runtime::{
     net::{TcpListener, UdpSocket},
     spawn,
 };
-use log::LevelFilter;
-use colored::Colorize;
+use slog::Drain;
 
+lazy_static! {
+    static ref LOG: slog::Logger = {
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        slog::Logger::root(drain, o!())
+    };
+}
 
 #[runtime::main]
 async fn main() -> Result<(), Error> {
-    env_logger::Builder::from_default_env().filter_level(LevelFilter::Info).init();
 
     // Gotta have that sweet banner
-    eprintln!(r#"
+    eprintln!(
+        r#"
      _           _     _        _
     | |__  _   _| |__ | |_ __ _(_)_ __
     | '_ \| | | | '_ \| __/ _` | | '_ \
@@ -40,7 +50,9 @@ async fn main() -> Result<(), Error> {
 
        local file transfers made {}
 
-    "#, "easy".green());
+    "#,
+        "easy".green()
+    );
 
     let matches = clap_app!(hubtain =>
         (version: "0.1")
@@ -61,7 +73,7 @@ async fn main() -> Result<(), Error> {
             let tcp_sock = TcpListener::bind("0.0.0.0:0")?;
             let udp_sock = UdpSocket::bind(udp_srv_bind_addr(42444))?;
             let file_path = sc.value_of("FILE").unwrap();
-            info!("Serving file {}", &file_path);
+            info!(LOG, "Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
             await!(serve(tcp_sock, udp_sock, serv_file))?;
         }
@@ -82,7 +94,7 @@ async fn serve<T: 'static + AsyncRead + Send + Unpin + Clone>(
     let tcp_port = tcp_sock.local_addr()?.port();
 
     socket.set_broadcast(true)?;
-    info!("UDP Listening on {}", socket.local_addr()?);
+    info!(LOG, "UDP Listening on {}", socket.local_addr()?);
 
     spawn(data_srv(tcp_sock, data_src));
 
@@ -90,7 +102,7 @@ async fn serve<T: 'static + AsyncRead + Send + Unpin + Clone>(
     let mut buf = vec![0u8; 100];
     loop {
         let (_, peer) = await!(socket.recv_from(&mut buf)).unwrap();
-        info!("Got client handshake from {}", &peer);
+        info!(LOG, "Got client handshake from {}", &peer);
         // Reply with tcp portnum
         let portnum = serialize(&tcp_port)?;
         await!(socket.send_to(&portnum, &peer))?;
@@ -101,13 +113,13 @@ async fn data_srv<T: 'static + AsyncRead + Unpin + Send + Clone>(
     mut listener: TcpListener,
     data_src: T,
 ) -> Result<(), Error> {
-    info!("TCP listening on {}", listener.local_addr()?);
+    info!(LOG, "TCP listening on {}", listener.local_addr()?);
     loop {
         let (mut stream, addr) = await!(listener.accept())?;
-        info!("Accepted connection from {:?}", &addr);
+        info!(LOG, "Accepted connection from {:?}", &addr);
         let mut data_src = data_src.clone();
         spawn(async move {
-            info!("Copying data to stream!");
+            info!(LOG, "Copying data to stream!");
             await!(data_src.copy_into(&mut stream))
         });
     }
