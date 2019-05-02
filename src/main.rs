@@ -26,6 +26,7 @@ use runtime::{
     spawn,
 };
 use slog::Drain;
+use std::net::{IpAddr, Ipv4Addr};
 
 lazy_static! {
     static ref LOG: slog::Logger = {
@@ -35,10 +36,17 @@ lazy_static! {
         slog::Logger::root(drain, o!())
     };
 }
+#[cfg(not(test))]
+lazy_static! {
+    static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(192, 168, 0, 255)) };
+}
+#[cfg(test)]
+lazy_static! {
+    static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)) };
+}
 
 #[runtime::main]
 async fn main() -> Result<(), Error> {
-
     // Gotta have that sweet banner
     eprintln!(
         r#"
@@ -126,8 +134,13 @@ async fn data_srv<T: 'static + AsyncRead + Unpin + Send + Clone>(
 }
 
 #[cfg(target_family = "windows")]
+#[cfg(not(test))]
 fn udp_srv_bind_addr(port_num: usize) -> String {
     format!("0.0.0.0:{}", port_num)
+}
+#[cfg(test)]
+fn udp_srv_bind_addr(port_num: usize) -> String {
+    format!("127.0.0.1:{}", port_num)
 }
 
 #[cfg(test)]
@@ -136,6 +149,7 @@ mod test {
     use crate::filereader::AsyncFileReader;
     use std::fs::File;
     use std::io::Read;
+    #[cfg(expensive_tests)]
     use std::time::Instant;
     static TEST_DATA: &[u8] = b"Hi I'm data";
 
