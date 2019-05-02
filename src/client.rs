@@ -6,6 +6,8 @@ use runtime::net::{TcpStream, UdpSocket};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
+use crate::LOG;
+
 pub struct DownloadClient {
     stream: TcpStream,
 }
@@ -13,7 +15,7 @@ pub struct DownloadClient {
 impl DownloadClient {
     pub async fn connect(udp_port: u16) -> Result<Self, Error> {
         let broadcast_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 255)), udp_port);
-        info!("Client broadcasting to {}", &broadcast_addr);
+        info!(LOG, "Client broadcasting to {}", &broadcast_addr);
         let mut client_s = UdpSocket::bind("0.0.0.0:0")?;
         client_s.set_broadcast(true)?;
         let mut buf = vec![0u8; 24];
@@ -22,18 +24,18 @@ impl DownloadClient {
         let tcp_port: u16 = deserialize(&buf)?;
         let mut tcp_sock_addr = peer;
         tcp_sock_addr.set_port(tcp_port);
-        info!("Client found server tcp at {}", &tcp_sock_addr);
+        info!(LOG, "Client found server tcp at {}", &tcp_sock_addr);
         // Connect to the tcp port
         let stream = await!(TcpStream::connect(tcp_sock_addr))?;
-        info!("Client connected to server!");
+        info!(LOG, "Client connected to server!");
         Ok(DownloadClient { stream })
     }
 
     pub async fn download_to_file(&mut self, path: PathBuf) -> Result<(), Error> {
-        info!("Starting download!");
+        info!(LOG, "Starting download!");
         let mut as_fwriter = AsyncFileWriter::new(path.as_path())?;
         await!(self.stream.copy_into(&mut as_fwriter))?;
-        info!("...done!");
+        info!(LOG, "...done!");
         Ok(())
     }
 
