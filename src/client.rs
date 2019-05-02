@@ -3,10 +3,10 @@ use bincode::deserialize;
 use failure::Error;
 use futures::io::AsyncReadExt;
 use runtime::net::{TcpStream, UdpSocket};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use crate::LOG;
+use crate::{BROADCAST_ADDR, LOG};
 
 pub struct DownloadClient {
     stream: TcpStream,
@@ -14,7 +14,7 @@ pub struct DownloadClient {
 
 impl DownloadClient {
     pub async fn connect(udp_port: u16) -> Result<Self, Error> {
-        let broadcast_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 255)), udp_port);
+        let broadcast_addr = SocketAddr::new(*BROADCAST_ADDR, udp_port);
         info!(LOG, "Client broadcasting to {}", &broadcast_addr);
         let mut client_s = UdpSocket::bind("0.0.0.0:0")?;
         client_s.set_broadcast(true)?;
