@@ -52,6 +52,21 @@ lazy_static! {
 
 #[runtime::main]
 async fn main() -> Result<(), Error> {
+    let matches = clap_app!(hubtain =>
+        (version: "0.1")
+        (author: "Spencer Judge")
+        (about: "Simple local file transfer server and client")
+        (@subcommand srv =>
+            (about: "Server mode")
+            (@arg FILE: +required "The file to serve")
+        )
+        (@subcommand fetch =>
+            (about: "Client download mode")
+        )
+    )
+    .setting(AppSettings::SubcommandRequiredElseHelp)
+    .get_matches();
+
     // Gotta have that sweet banner
     eprintln!(
         r#"
@@ -67,20 +82,6 @@ async fn main() -> Result<(), Error> {
         "easy".green()
     );
 
-    let matches = clap_app!(hubtain =>
-        (version: "0.1")
-        (author: "Spencer Judge")
-        (about: "Simple local file transfer server and client")
-        (@subcommand srv =>
-            (about: "Server mode")
-            (@arg FILE: +required "The file to serve")
-        )
-        (@subcommand fetch =>
-            (about: "Client download mode")
-        )
-    )
-    .setting(AppSettings::SubcommandRequiredElseHelp)
-    .get_matches();
     match matches.subcommand() {
         ("srv", Some(sc)) => {
             let tcp_sock = TcpListener::bind("0.0.0.0:0")?;
