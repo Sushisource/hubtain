@@ -36,7 +36,7 @@ lazy_static! {
         let drain = slog_async::Async::new(drain).build().fuse();
         slog::Logger::root(drain, o!())
     };
-    static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(192, 168, 0, 255)) };
+    static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(192, 168, 1, 255)) };
 }
 
 #[cfg(test)]
@@ -143,6 +143,11 @@ async fn data_srv<T: 'static + AsyncRead + Unpin + Send + Clone>(
 #[cfg(not(test))]
 fn udp_srv_bind_addr(port_num: usize) -> String {
     format!("0.0.0.0:{}", port_num)
+}
+#[cfg(target_family = "unix")]
+#[cfg(not(test))]
+fn udp_srv_bind_addr(port_num: usize) -> String {
+    format!("192.168.1.255:{}", port_num)
 }
 #[cfg(test)]
 fn udp_srv_bind_addr(port_num: usize) -> String {
