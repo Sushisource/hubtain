@@ -13,24 +13,23 @@ extern crate lazy_static;
 mod client;
 mod filereader;
 mod filewriter;
+mod server;
 
 use crate::client::DownloadClient;
 use crate::filereader::AsyncFileReader;
-use bincode::serialize;
 use clap::AppSettings;
 use colored::Colorize;
 use failure::Error;
-use futures::io::{AsyncRead, AsyncReadExt};
 use runtime::{
     net::{TcpListener, UdpSocket},
-    spawn,
 };
 use slog::Drain;
 use std::net::{IpAddr, Ipv4Addr};
+use crate::server::serve;
 
 #[cfg(not(test))]
 lazy_static! {
-    static ref LOG: slog::Logger = {
+    pub static ref LOG: slog::Logger = {
         let decorator = slog_term::TermDecorator::new().build();
         let drain = slog_term::CompactFormat::new(decorator).build().fuse();
         let drain = slog_async::Async::new(drain).build().fuse();
@@ -59,6 +58,7 @@ async fn main() -> Result<(), Error> {
         (@subcommand srv =>
             (about: "Server mode")
             (@arg FILE: +required "The file to serve")
+            (@arg stayalive: -s --stayalive "Server stays alive indefinitely rather than stopping after serving one file")
         )
         (@subcommand fetch =>
             (about: "Client download mode")
@@ -100,45 +100,6 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn serve<T: 'static + AsyncRead + Send + Unpin + Clone>(
-    tcp_sock: TcpListener,
-    mut socket: UdpSocket,
-    data_src: T,
-) -> Result<(), Error> {
-    let tcp_port = tcp_sock.local_addr()?.port();
-
-    socket.set_broadcast(true)?;
-    info!(LOG, "UDP Listening on {}", socket.local_addr()?);
-
-    spawn(data_srv(tcp_sock, data_src));
-
-    // Wait for broadcast from peer
-    let mut buf = vec![0u8; 100];
-    loop {
-        let (_, peer) = await!(socket.recv_from(&mut buf)).unwrap();
-        info!(LOG, "Got client handshake from {}", &peer);
-        // Reply with tcp portnum
-        let portnum = serialize(&tcp_port)?;
-        await!(socket.send_to(&portnum, &peer))?;
-    }
-}
-
-async fn data_srv<T: 'static + AsyncRead + Unpin + Send + Clone>(
-    mut listener: TcpListener,
-    data_src: T,
-) -> Result<(), Error> {
-    info!(LOG, "TCP listening on {}", listener.local_addr()?);
-    loop {
-        let (mut stream, addr) = await!(listener.accept())?;
-        info!(LOG, "Accepted connection from {:?}", &addr);
-        let mut data_src = data_src.clone();
-        spawn(async move {
-            info!(LOG, "Copying data to stream!");
-            await!(data_src.copy_into(&mut stream))
-        });
-    }
-}
-
 #[cfg(target_family = "windows")]
 #[cfg(not(test))]
 fn udp_srv_bind_addr(port_num: usize) -> String {
@@ -158,10 +119,13 @@ fn udp_srv_bind_addr(port_num: usize) -> String {
 mod test {
     use super::*;
     use crate::filereader::AsyncFileReader;
-    use std::fs::File;
-    use std::io::Read;
-    #[cfg(expensive_tests)]
-    use std::time::Instant;
+    use std::{
+        fs::File,
+        io::Read,
+        time::Instant
+    };
+    use runtime::spawn;
+
     static TEST_DATA: &[u8] = b"Hi I'm data";
 
     #[runtime::test]
