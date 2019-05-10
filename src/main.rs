@@ -16,6 +16,7 @@ mod filewriter;
 mod server;
 
 use crate::client::DownloadClient;
+use crate::filereader::AsyncFileReader;
 use crate::server::FileSrv;
 use clap::AppSettings;
 use colored::Colorize;
@@ -23,7 +24,6 @@ use failure::Error;
 use runtime::net::{TcpListener, UdpSocket};
 use slog::Drain;
 use std::net::{IpAddr, Ipv4Addr};
-use crate::filereader::AsyncFileReader;
 
 #[cfg(not(test))]
 lazy_static! {
@@ -87,7 +87,7 @@ async fn main() -> Result<(), Error> {
             let file_path = sc.value_of("FILE").unwrap();
             info!(LOG, "Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
-            let mut server = FileSrv::new(udp_sock, tcp_sock, serv_file);
+            let server = FileSrv::new(udp_sock, tcp_sock, serv_file);
             await!(server.serve())?;
         }
         ("fetch", Some(_)) => {

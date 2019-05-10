@@ -13,8 +13,8 @@ where
 {
     stay_alive: bool,
     udp_sock: UdpSocket,
-    tcp_sock: TcpListener,
-    data: T,
+    tcp_sock: Option<TcpListener>,
+    data: Option<T>,
 }
 
 impl<T> FileSrv<T>
@@ -25,18 +25,22 @@ where
         FileSrv {
             stay_alive: false,
             udp_sock,
-            tcp_sock,
-            data,
+            tcp_sock: Some(tcp_sock),
+            data: Some(data),
         }
     }
 
-    pub async fn serve(&'static mut self) -> Result<(), Error> {
-        let tcp_port = self.tcp_sock.local_addr()?.port();
+    pub async fn serve(mut self) -> Result<(), Error> {
+        // TODO: no unwrap
+        let tcp_port = self.tcp_sock.as_ref().unwrap().local_addr()?.port();
 
         self.udp_sock.set_broadcast(true)?;
         info!(LOG, "UDP Listening on {}", self.udp_sock.local_addr()?);
 
-        spawn(self.data_srv());
+        spawn(FileSrv::data_srv(
+            self.tcp_sock.take().unwrap(),
+            self.data.take().unwrap(),
+        ));
 
         // Wait for broadcast from peer
         let mut buf = vec![0u8; 100];
@@ -49,13 +53,13 @@ where
         }
     }
 
-    async fn data_srv(&mut self) -> Result<(), Error> {
-        info!(LOG, "TCP listening on {}", self.tcp_sock.local_addr()?);
+    async fn data_srv(mut tcp_sock: TcpListener, data: T) -> Result<(), Error> {
+        info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
         loop {
-            let (mut stream, addr) = await!(self.tcp_sock.accept())?;
+            let (mut stream, addr) = await!(tcp_sock.accept())?;
             info!(LOG, "Accepted connection from {:?}", &addr);
             // TODO: Unneeded clone?
-            let mut data_src = self.data.clone();
+            let mut data_src = data.clone();
             spawn(async move {
                 info!(LOG, "Copying data to stream!");
                 await!(data_src.copy_into(&mut stream))
