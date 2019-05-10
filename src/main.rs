@@ -16,16 +16,14 @@ mod filewriter;
 mod server;
 
 use crate::client::DownloadClient;
-use crate::filereader::AsyncFileReader;
+use crate::server::FileSrv;
 use clap::AppSettings;
 use colored::Colorize;
 use failure::Error;
-use runtime::{
-    net::{TcpListener, UdpSocket},
-};
+use runtime::net::{TcpListener, UdpSocket};
 use slog::Drain;
 use std::net::{IpAddr, Ipv4Addr};
-use crate::server::serve;
+use crate::filereader::AsyncFileReader;
 
 #[cfg(not(test))]
 lazy_static! {
@@ -89,7 +87,8 @@ async fn main() -> Result<(), Error> {
             let file_path = sc.value_of("FILE").unwrap();
             info!(LOG, "Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
-            await!(serve(tcp_sock, udp_sock, serv_file))?;
+            let mut server = FileSrv::new(udp_sock, tcp_sock, serv_file);
+            await!(server.serve())?;
         }
         ("fetch", Some(_)) => {
             let mut client = await!(DownloadClient::connect(42444))?;
@@ -119,12 +118,8 @@ fn udp_srv_bind_addr(port_num: usize) -> String {
 mod test {
     use super::*;
     use crate::filereader::AsyncFileReader;
-    use std::{
-        fs::File,
-        io::Read,
-        time::Instant
-    };
     use runtime::spawn;
+    use std::{fs::File, io::Read, time::Instant};
 
     static TEST_DATA: &[u8] = b"Hi I'm data";
 
