@@ -128,7 +128,8 @@ mod test {
         let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
-        spawn(serve(tcp_sock, udp_sock, TEST_DATA));
+        let server = FileSrv::new(udp_sock, tcp_sock, TEST_DATA);
+        spawn(server.serve());
 
         let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
         let content = await!(client.download_to_vec()).unwrap();
@@ -141,7 +142,8 @@ mod test {
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
-        spawn(serve(tcp_sock, udp_sock, test_file));
+        let server = FileSrv::new(udp_sock, tcp_sock, test_file);
+        spawn(server.serve());
 
         let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
         await!(client.download_to_file("testdata/tmp.small.txt".into())).unwrap();
@@ -166,7 +168,8 @@ mod test {
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
-        spawn(serve(tcp_sock, udp_sock, test_file));
+        let server = FileSrv::new(udp_sock, tcp_sock, test_file);
+        spawn(server.serve());
 
         let dl_futures = (1..100).map(async move |_| {
             let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
@@ -192,7 +195,8 @@ mod test {
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
-        spawn(serve(tcp_sock, udp_sock, test_file));
+        let server = FileSrv::new(udp_sock, tcp_sock, test_file);
+        spawn(server.serve());
 
         let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
         let start = Instant::now();
