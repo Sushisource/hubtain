@@ -1,2 +1,7 @@
 /target
 **/*.rs.bk
+
+*.iml
+res.txt
+download
+testdata/large.bin
