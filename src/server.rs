@@ -40,19 +40,19 @@ where
         let data_handle = spawn(FileSrv::data_srv(
             self.tcp_sock.take().unwrap(),
             self.data.take().unwrap(),
-            self.stay_alive
+            self.stay_alive,
         ));
 
         // Wait for broadcast from peer
         let mut buf = vec![0u8; 100];
         loop {
-            let (_, peer) = await!(self.udp_sock.recv_from(&mut buf)).unwrap();
+            let (_, peer) = self.udp_sock.recv_from(&mut buf).await.unwrap();
             info!(LOG, "Got client handshake from {}", &peer);
             // Reply with tcp portnum
             let portnum = serialize(&tcp_port)?;
-            await!(self.udp_sock.send_to(&portnum, &peer))?;
+            self.udp_sock.send_to(&portnum, &peer).await?;
             if !self.stay_alive {
-                await!(data_handle)?;
+                data_handle.await?;
                 info!(LOG, "Done serving!");
                 return Ok(());
             }
@@ -62,13 +62,13 @@ where
     async fn data_srv(mut tcp_sock: TcpListener, data: T, stay_alive: bool) -> Result<(), Error> {
         info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
         loop {
-            let (mut stream, addr) = await!(tcp_sock.accept())?;
+            let (mut stream, addr) = tcp_sock.accept().await?;
             info!(LOG, "Accepted connection from {:?}", &addr);
             // TODO: Unneeded clone?
             let mut data_src = data.clone();
             spawn(async move {
                 info!(LOG, "Copying data to stream!");
-                await!(data_src.copy_into(&mut stream))
+                data_src.copy_into(&mut stream).await
             });
             if !stay_alive {
                 return Ok(());

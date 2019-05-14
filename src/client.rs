@@ -19,8 +19,8 @@ impl DownloadClient {
         let mut client_s = UdpSocket::bind("0.0.0.0:0")?;
         client_s.set_broadcast(true)?;
         let mut buf = vec![0u8; 24];
-        await!(client_s.send_to(b"I'm a client!", broadcast_addr))?;
-        let (_, peer) = await!(client_s.recv_from(&mut buf))?;
+        client_s.send_to(b"I'm a client!", broadcast_addr).await?;
+        let (_, peer) = client_s.recv_from(&mut buf).await?;
         let tcp_port: u16 = deserialize(&buf)?;
         let mut tcp_sock_addr = peer;
         tcp_sock_addr.set_port(tcp_port);
@@ -34,7 +34,7 @@ impl DownloadClient {
     pub async fn download_to_file(&mut self, path: PathBuf) -> Result<(), Error> {
         info!(LOG, "Starting download!");
         let mut as_fwriter = AsyncFileWriter::new(path.as_path())?;
-        await!(self.stream.copy_into(&mut as_fwriter))?;
+        self.stream.copy_into(&mut as_fwriter).await?;
         info!(LOG, "...done!");
         Ok(())
     }
@@ -42,7 +42,7 @@ impl DownloadClient {
     #[cfg(test)]
     pub async fn download_to_vec(&mut self) -> std::io::Result<Vec<u8>> {
         let mut download = Vec::with_capacity(2056);
-        await!(self.stream.read_to_end(&mut download))?;
+        self.stream.read_to_end(&mut download).await?;
         Ok(download)
     }
 }

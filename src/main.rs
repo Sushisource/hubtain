@@ -89,11 +89,11 @@ async fn main() -> Result<(), Error> {
             info!(LOG, "Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
             let server = FileSrv::new(udp_sock, tcp_sock, serv_file, sc.is_present("stayalive"));
-            await!(server.serve())?;
+            server.serve().await?;
         }
         ("fetch", Some(_)) => {
-            let mut client = await!(DownloadClient::connect(42444))?;
-            await!(client.download_to_file("download".into()))?;
+            let mut client = DownloadClient::connect(42444).await?;
+            client.download_to_file("download".into()).await?;
             info!(LOG, "Download complete!");
         }
         _ => bail!("Unmatched subcommand"),
@@ -135,8 +135,8 @@ mod test {
         let server = FileSrv::new(udp_sock, tcp_sock, TEST_DATA, false);
         spawn(server.serve());
 
-        let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
-        let content = await!(client.download_to_vec()).unwrap();
+        let mut client = DownloadClient::connect(udp_port).await.unwrap();
+        let content = client.download_to_vec().await.unwrap();
         assert_eq!(content, TEST_DATA);
     }
 
@@ -149,8 +149,8 @@ mod test {
         let server = FileSrv::new(udp_sock, tcp_sock, test_file, false);
         spawn(server.serve());
 
-        let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
-        await!(client.download_to_file("testdata/tmp.small.txt".into())).unwrap();
+        let mut client = DownloadClient::connect(udp_port).await.unwrap();
+        client.download_to_file("testdata/tmp.small.txt".into()).await.unwrap();
 
         let mut expected_dat = vec![];
         File::open("testdata/small.txt")
@@ -176,10 +176,10 @@ mod test {
         spawn(server.serve());
 
         let dl_futures = (1..100).map(async move |_| {
-            let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
-            await!(client.download_to_vec())
+            let mut client = DownloadClient::connect(udp_port).await.unwrap();
+            client.download_to_vec().await
         });
-        let contents = await!(futures::future::try_join_all(dl_futures)).unwrap();
+        let contents = futures::future::try_join_all(dl_futures).await.unwrap();
 
         let mut test_dat = vec![];
         File::open("testdata/small.txt")
@@ -202,10 +202,10 @@ mod test {
         let server = FileSrv::new(udp_sock, tcp_sock, test_file, false);
         spawn(server.serve());
 
-        let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
+        let mut client = DownloadClient::connect(udp_port).await.unwrap();
         let start = Instant::now();
         dbg!("Began transfer");
-        let content = await!(client.download_to_vec()).unwrap();
+        let content = client.download_to_vec().await.unwrap();
         dbg!("Finished transfer after {:?}", start.elapsed());
 
         let start = Instant::now();
