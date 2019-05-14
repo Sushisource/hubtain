@@ -26,7 +26,7 @@ impl DownloadClient {
         tcp_sock_addr.set_port(tcp_port);
         info!(LOG, "Client found server tcp at {}", &tcp_sock_addr);
         // Connect to the tcp port
-        let stream = await!(TcpStream::connect(tcp_sock_addr))?;
+        let stream = TcpStream::connect(tcp_sock_addr).await?;
         info!(LOG, "Client connected to server!");
         Ok(DownloadClient { stream })
     }
