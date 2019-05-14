@@ -21,9 +21,9 @@ impl<T> FileSrv<T>
 where
     T: 'static + AsyncRead + Send + Unpin + Clone,
 {
-    pub fn new(udp_sock: UdpSocket, tcp_sock: TcpListener, data: T) -> Self {
+    pub fn new(udp_sock: UdpSocket, tcp_sock: TcpListener, data: T, stay_alive: bool) -> Self {
         FileSrv {
-            stay_alive: false,
+            stay_alive,
             udp_sock,
             tcp_sock: Some(tcp_sock),
             data: Some(data),
@@ -37,9 +37,10 @@ where
         self.udp_sock.set_broadcast(true)?;
         info!(LOG, "UDP Listening on {}", self.udp_sock.local_addr()?);
 
-        spawn(FileSrv::data_srv(
+        let data_handle = spawn(FileSrv::data_srv(
             self.tcp_sock.take().unwrap(),
             self.data.take().unwrap(),
+            self.stay_alive
         ));
 
         // Wait for broadcast from peer
@@ -50,10 +51,15 @@ where
             // Reply with tcp portnum
             let portnum = serialize(&tcp_port)?;
             await!(self.udp_sock.send_to(&portnum, &peer))?;
+            if !self.stay_alive {
+                await!(data_handle)?;
+                info!(LOG, "Done serving!");
+                return Ok(());
+            }
         }
     }
 
-    async fn data_srv(mut tcp_sock: TcpListener, data: T) -> Result<(), Error> {
+    async fn data_srv(mut tcp_sock: TcpListener, data: T, stay_alive: bool) -> Result<(), Error> {
         info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
         loop {
             let (mut stream, addr) = await!(tcp_sock.accept())?;
@@ -64,6 +70,9 @@ where
                 info!(LOG, "Copying data to stream!");
                 await!(data_src.copy_into(&mut stream))
             });
+            if !stay_alive {
+                return Ok(());
+            }
         }
     }
 }

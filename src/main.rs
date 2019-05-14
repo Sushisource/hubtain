@@ -24,6 +24,7 @@ use failure::Error;
 use runtime::net::{TcpListener, UdpSocket};
 use slog::Drain;
 use std::net::{IpAddr, Ipv4Addr};
+use std::time::Duration;
 
 #[cfg(not(test))]
 lazy_static! {
@@ -33,7 +34,7 @@ lazy_static! {
         let drain = slog_async::Async::new(drain).build().fuse();
         slog::Logger::root(drain, o!())
     };
-    static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(192, 168, 1, 255)) };
+    static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(192, 168, 0, 255)) };
 }
 
 #[cfg(test)]
@@ -87,15 +88,18 @@ async fn main() -> Result<(), Error> {
             let file_path = sc.value_of("FILE").unwrap();
             info!(LOG, "Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
-            let server = FileSrv::new(udp_sock, tcp_sock, serv_file);
+            let server = FileSrv::new(udp_sock, tcp_sock, serv_file, sc.is_present("stayalive"));
             await!(server.serve())?;
         }
         ("fetch", Some(_)) => {
             let mut client = await!(DownloadClient::connect(42444))?;
             await!(client.download_to_file("download".into()))?;
+            info!(LOG, "Download complete!");
         }
         _ => bail!("Unmatched subcommand"),
     }
+    // Wait a beat to finish printing any async logging
+    std::thread::sleep(Duration::from_millis(100));
     Ok(())
 }
 
@@ -107,7 +111,7 @@ fn udp_srv_bind_addr(port_num: usize) -> String {
 #[cfg(target_family = "unix")]
 #[cfg(not(test))]
 fn udp_srv_bind_addr(port_num: usize) -> String {
-    format!("192.168.1.255:{}", port_num)
+    format!("192.168.0.255:{}", port_num)
 }
 #[cfg(test)]
 fn udp_srv_bind_addr(port_num: usize) -> String {
@@ -128,7 +132,7 @@ mod test {
         let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
-        let server = FileSrv::new(udp_sock, tcp_sock, TEST_DATA);
+        let server = FileSrv::new(udp_sock, tcp_sock, TEST_DATA, false);
         spawn(server.serve());
 
         let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
@@ -142,7 +146,7 @@ mod test {
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
-        let server = FileSrv::new(udp_sock, tcp_sock, test_file);
+        let server = FileSrv::new(udp_sock, tcp_sock, test_file, false);
         spawn(server.serve());
 
         let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
@@ -168,7 +172,7 @@ mod test {
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
-        let server = FileSrv::new(udp_sock, tcp_sock, test_file);
+        let server = FileSrv::new(udp_sock, tcp_sock, test_file, true);
         spawn(server.serve());
 
         let dl_futures = (1..100).map(async move |_| {
@@ -195,7 +199,7 @@ mod test {
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
-        let server = FileSrv::new(udp_sock, tcp_sock, test_file);
+        let server = FileSrv::new(udp_sock, tcp_sock, test_file, false);
         spawn(server.serve());
 
         let mut client = await!(DownloadClient::connect(udp_port)).unwrap();
