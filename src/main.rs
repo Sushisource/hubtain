@@ -14,6 +14,7 @@ mod client;
 mod filereader;
 mod filewriter;
 mod server;
+mod broadcast_addr_picker;
 
 use crate::client::DownloadClient;
 use crate::filereader::AsyncFileReader;
@@ -25,6 +26,7 @@ use runtime::net::{TcpListener, UdpSocket};
 use slog::Drain;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
+use broadcast_addr_picker::select_broadcast_addr;
 
 #[cfg(not(test))]
 lazy_static! {
@@ -34,7 +36,7 @@ lazy_static! {
         let drain = slog_async::Async::new(drain).build().fuse();
         slog::Logger::root(drain, o!())
     };
-    static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(192, 168, 0, 255)) };
+    static ref BROADCAST_ADDR: IpAddr = select_broadcast_addr().unwrap();
 }
 
 #[cfg(test)]

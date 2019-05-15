@@ -16,6 +16,7 @@ futures-preview = { version = "=0.3.0-alpha.16", features = ["io-compat"] }
 futures-util = "0.2"
 failure = "0.1"
 futures01 = { package = "futures", version = "0.1" }
+get_if_addrs = "0.5"
 serde = "1.0"
 bincode = "1.1"
 log = "0.4.0"
