@@ -1,4 +1,5 @@
 #![feature(async_await, await_macro, test)]
+#![cfg_attr(test, allow(unused_imports))]
 
 extern crate futures;
 #[macro_use]
@@ -10,23 +11,25 @@ extern crate slog;
 #[macro_use]
 extern crate lazy_static;
 
+mod broadcast_addr_picker;
 mod client;
 mod filereader;
 mod filewriter;
 mod server;
-mod broadcast_addr_picker;
 
 use crate::client::DownloadClient;
 use crate::filereader::AsyncFileReader;
 use crate::server::FileSrv;
+use broadcast_addr_picker::select_broadcast_addr;
 use clap::AppSettings;
 use colored::Colorize;
 use failure::Error;
 use runtime::net::{TcpListener, UdpSocket};
 use slog::Drain;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
+#[cfg(test)]
+use std::net::Ipv4Addr;
 use std::time::Duration;
-use broadcast_addr_picker::select_broadcast_addr;
 
 #[cfg(not(test))]
 lazy_static! {
@@ -152,7 +155,10 @@ mod test {
         spawn(server.serve());
 
         let mut client = DownloadClient::connect(udp_port).await.unwrap();
-        client.download_to_file("testdata/tmp.small.txt".into()).await.unwrap();
+        client
+            .download_to_file("testdata/tmp.small.txt".into())
+            .await
+            .unwrap();
 
         let mut expected_dat = vec![];
         File::open("testdata/small.txt")

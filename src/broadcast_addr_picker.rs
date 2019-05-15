@@ -1,19 +1,16 @@
+#![cfg_attr(test, allow(dead_code))]
+
 use failure::{err_msg, Error};
 use std::net::IpAddr;
 
-#[cfg(target_family = "windows")]
 use get_if_addrs::get_if_addrs;
 use get_if_addrs::IfAddr;
 
-#[cfg(target_family = "windows")]
 pub fn select_broadcast_addr() -> Result<IpAddr, Error> {
     let addrs = get_if_addrs()?;
     let addrs = addrs.into_iter().map(|iface| iface.addr);
     select_from_ips(addrs)
 }
-
-#[cfg(target_family = "unix")]
-pub fn select_broadcast_addr() -> IpAddr {}
 
 fn select_from_ips<T: IntoIterator<Item = IfAddr>>(addrs: T) -> Result<IpAddr, Error> {
     addrs
