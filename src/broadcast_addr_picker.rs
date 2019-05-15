@@ -29,11 +29,11 @@ fn select_from_ips<T: IntoIterator<Item = IfAddr>>(addrs: T) -> Result<IpAddr, E
                     if v4addr.ip.octets()[0] != 192 {
                         return None;
                     }
-                    v4addr.broadcast.map(|bc| IpAddr::V4(bc))
+                    v4addr.broadcast.map(IpAddr::V4)
                 }
                 _ => None,
             }
         })
         .next()
-        .ok_or(err_msg("Couldn't select a broadcast address"))
+        .ok_or_else(|| err_msg("Couldn't select a broadcast address"))
 }
