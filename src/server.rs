@@ -1,3 +1,4 @@
+use crate::mnemonic::random_word;
 use crate::LOG;
 use bincode::serialize;
 use failure::Error;
@@ -6,7 +7,6 @@ use runtime::{
     net::{TcpListener, UdpSocket},
     spawn,
 };
-use crate::mnemonic::random_word;
 
 pub struct FileSrv<T>
 where
@@ -30,7 +30,7 @@ where
             udp_sock,
             tcp_sock: Some(tcp_sock),
             data: Some(data),
-            name: name.to_string()
+            name: name.to_string(),
         }
     }
 
@@ -51,8 +51,8 @@ where
         // Wait for broadcast from peer
         let mut buf = vec![0u8; 100];
         loop {
-            let (_, peer) = self.udp_sock.recv_from(&mut buf).await.unwrap();
-            info!(LOG, "Got client handshake from {}", &peer);
+            let (_, peer) = self.udp_sock.recv_from(&mut buf).await?;
+            info!(LOG, "Client ping from {}", &peer);
             // Reply with name and tcp portnum
             let portnum = serialize(&(&self.name, &tcp_port))?;
             self.udp_sock.send_to(&portnum, &peer).await?;
@@ -68,11 +68,11 @@ where
         info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
         loop {
             let (mut stream, addr) = tcp_sock.accept().await?;
-            info!(LOG, "Accepted connection from {:?}", &addr);
+            info!(LOG, "Accepted download connection from {:?}", &addr);
             // TODO: Unneeded clone?
             let mut data_src = data.clone();
             spawn(async move {
-                info!(LOG, "Copying data to stream!");
+                info!(LOG, "Client downloading!");
                 data_src.copy_into(&mut stream).await
             });
             if !stay_alive {

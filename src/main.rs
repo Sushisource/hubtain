@@ -15,8 +15,8 @@ mod broadcast_addr_picker;
 mod client;
 mod filereader;
 mod filewriter;
-mod server;
 mod mnemonic;
+mod server;
 
 use crate::client::DownloadClient;
 use crate::filereader::AsyncFileReader;
@@ -54,7 +54,7 @@ lazy_static! {
     static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)) };
 }
 
-#[runtime::main]
+#[runtime::main(runtime_tokio::Tokio)]
 async fn main() -> Result<(), Error> {
     let matches = clap_app!(hubtain =>
         (version: "0.1")
@@ -133,7 +133,7 @@ mod test {
 
     static TEST_DATA: &[u8] = b"Hi I'm data";
 
-    #[runtime::test]
+    #[runtime::test(runtime_tokio::Tokio)]
     async fn basic_transfer() {
         let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -146,7 +146,7 @@ mod test {
         assert_eq!(content, TEST_DATA);
     }
 
-    #[runtime::test]
+    #[runtime::test(runtime_tokio::Tokio)]
     async fn single_small_file_transfer() {
         let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -175,7 +175,7 @@ mod test {
         std::fs::remove_file("testdata/tmp.small.txt").unwrap();
     }
 
-    #[runtime::test]
+    #[runtime::test(runtime_tokio::Tokio)]
     async fn multiple_small_file_transfer() {
         let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -202,7 +202,7 @@ mod test {
     }
 
     #[cfg(expensive_tests)]
-    #[runtime::test]
+    #[runtime::test(runtime_tokio::Tokio)]
     async fn large_file_transfer() {
         let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
