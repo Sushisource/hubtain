@@ -21,10 +21,13 @@ impl DownloadClient {
         let mut buf = vec![0u8; 24];
         client_s.send_to(b"I'm a client!", broadcast_addr).await?;
         let (_, peer) = client_s.recv_from(&mut buf).await?;
-        let tcp_port: u16 = deserialize(&buf)?;
+        let (name, tcp_port): (String, u16) = deserialize(&buf)?;
         let mut tcp_sock_addr = peer;
         tcp_sock_addr.set_port(tcp_port);
-        info!(LOG, "Client found server tcp at {}", &tcp_sock_addr);
+        info!(
+            LOG,
+            "Client found server named {} - tcp port: {}", &name, &tcp_sock_addr
+        );
         // Connect to the tcp port
         let stream = TcpStream::connect(tcp_sock_addr).await?;
         info!(LOG, "Client connected to server!");

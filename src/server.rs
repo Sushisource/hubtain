@@ -6,6 +6,7 @@ use runtime::{
     net::{TcpListener, UdpSocket},
     spawn,
 };
+use crate::mnemonic::random_word;
 
 pub struct FileSrv<T>
 where
@@ -15,6 +16,7 @@ where
     udp_sock: UdpSocket,
     tcp_sock: Option<TcpListener>,
     data: Option<T>,
+    name: String,
 }
 
 impl<T> FileSrv<T>
@@ -22,15 +24,18 @@ where
     T: 'static + AsyncRead + Send + Unpin + Clone,
 {
     pub fn new(udp_sock: UdpSocket, tcp_sock: TcpListener, data: T, stay_alive: bool) -> Self {
+        let name = random_word();
         FileSrv {
             stay_alive,
             udp_sock,
             tcp_sock: Some(tcp_sock),
             data: Some(data),
+            name: name.to_string()
         }
     }
 
     pub async fn serve(mut self) -> Result<(), Error> {
+        info!(LOG, "Server name: {}", self.name);
         // TODO: no unwrap
         let tcp_port = self.tcp_sock.as_ref().unwrap().local_addr()?.port();
 
@@ -48,8 +53,8 @@ where
         loop {
             let (_, peer) = self.udp_sock.recv_from(&mut buf).await.unwrap();
             info!(LOG, "Got client handshake from {}", &peer);
-            // Reply with tcp portnum
-            let portnum = serialize(&tcp_port)?;
+            // Reply with name and tcp portnum
+            let portnum = serialize(&(&self.name, &tcp_port))?;
             self.udp_sock.send_to(&portnum, &peer).await?;
             if !self.stay_alive {
                 data_handle.await?;

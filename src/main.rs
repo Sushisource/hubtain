@@ -16,6 +16,7 @@ mod client;
 mod filereader;
 mod filewriter;
 mod server;
+mod mnemonic;
 
 use crate::client::DownloadClient;
 use crate::filereader::AsyncFileReader;
