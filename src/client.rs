@@ -81,7 +81,7 @@ async fn read_replies_for(
                 if e.is_elapsed() {
                     break;
                 }
-                return Err(e.into())
+                return Err(e.into());
             }
         }
     }
