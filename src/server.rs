@@ -8,6 +8,7 @@ use runtime::{
     spawn,
 };
 
+/// File server for hubtain's srv mode
 pub struct FileSrv<T>
 where
     T: 'static + AsyncRead + Send + Unpin + Clone,
@@ -23,6 +24,9 @@ impl<T> FileSrv<T>
 where
     T: 'static + AsyncRead + Send + Unpin + Clone,
 {
+    /// Create a new `FileSrv` given UDP and TCP sockets to listen on and some data source to serve
+    /// If `stay_alive` is false, the server will shut down after serving the data to the first
+    /// client who downloads it.
     pub fn new(udp_sock: UdpSocket, tcp_sock: TcpListener, data: T, stay_alive: bool) -> Self {
         let name = random_word();
         FileSrv {
@@ -34,6 +38,7 @@ where
         }
     }
 
+    /// Begin listening for connections and serving data.
     pub async fn serve(mut self) -> Result<(), Error> {
         info!(LOG, "Server name: {}", self.name);
         // TODO: no unwrap
@@ -64,6 +69,8 @@ where
         }
     }
 
+    /// The data srv runs independently of the main srv loop, and does the job of actually
+    /// transferring data to clients.
     async fn data_srv(mut tcp_sock: TcpListener, data: T, stay_alive: bool) -> Result<(), Error> {
         info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
         loop {

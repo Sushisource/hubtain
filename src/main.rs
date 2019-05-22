@@ -10,6 +10,8 @@ extern crate failure;
 extern crate slog;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate derive_new;
 
 mod broadcast_addr_picker;
 mod client;
@@ -98,7 +100,8 @@ async fn main() -> Result<(), Error> {
             server.serve().await?;
         }
         ("fetch", Some(_)) => {
-            let mut client = DownloadClient::connect(42444).await?;
+            // TODO: Interactive server selector
+            let mut client = DownloadClient::connect(42444, |_| true).await?;
             client.download_to_file("download".into()).await?;
             info!(LOG, "Download complete!");
         }
@@ -127,6 +130,7 @@ fn udp_srv_bind_addr(port_num: usize) -> String {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::client::test_srvr_sel;
     use crate::filereader::AsyncFileReader;
     use runtime::spawn;
     use std::{fs::File, io::Read, time::Instant};
@@ -141,7 +145,9 @@ mod test {
         let server = FileSrv::new(udp_sock, tcp_sock, TEST_DATA, false);
         spawn(server.serve());
 
-        let mut client = DownloadClient::connect(udp_port).await.unwrap();
+        let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
+            .await
+            .unwrap();
         let content = client.download_to_vec().await.unwrap();
         assert_eq!(content, TEST_DATA);
     }
@@ -155,7 +161,9 @@ mod test {
         let server = FileSrv::new(udp_sock, tcp_sock, test_file, false);
         spawn(server.serve());
 
-        let mut client = DownloadClient::connect(udp_port).await.unwrap();
+        let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
+            .await
+            .unwrap();
         client
             .download_to_file("testdata/tmp.small.txt".into())
             .await
@@ -185,7 +193,9 @@ mod test {
         spawn(server.serve());
 
         let dl_futures = (1..100).map(async move |_| {
-            let mut client = DownloadClient::connect(udp_port).await.unwrap();
+            let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
+                .await
+                .unwrap();
             client.download_to_vec().await
         });
         let contents = futures::future::try_join_all(dl_futures).await.unwrap();
@@ -211,7 +221,9 @@ mod test {
         let server = FileSrv::new(udp_sock, tcp_sock, test_file, false);
         spawn(server.serve());
 
-        let mut client = DownloadClient::connect(udp_port).await.unwrap();
+        let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
+            .await
+            .unwrap();
         let start = Instant::now();
         dbg!("Began transfer");
         let content = client.download_to_vec().await.unwrap();
