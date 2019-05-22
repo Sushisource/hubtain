@@ -1,12 +1,6 @@
 use failure::Error;
-use futures::io::AsyncWrite;
-use futures::task::Context;
-use std::fs::File;
-use std::io;
-use std::io::Write;
-use std::path::Path;
-use std::pin::Pin;
-use std::task::Poll;
+use futures::{io::AsyncWrite, task::Context};
+use std::{fs::File, io, io::Write, path::Path, pin::Pin, task::Poll};
 
 pub struct AsyncFileWriter {
     file: File,

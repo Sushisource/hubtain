@@ -1,12 +1,9 @@
 use crate::filewriter::AsyncFileWriter;
 use bincode::deserialize;
 use failure::Error;
-use futures::io::AsyncReadExt;
-use futures::{compat::Future01CompatExt, TryFutureExt};
+use futures::{compat::Future01CompatExt, io::AsyncReadExt, TryFutureExt};
 use runtime::net::{TcpStream, UdpSocket};
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::time::Duration;
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use tokio::prelude::FutureExt;
 
 use crate::{BROADCAST_ADDR, LOG};

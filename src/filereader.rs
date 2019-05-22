@@ -1,10 +1,12 @@
 use failure::Error;
 use futures::io::AsyncRead;
-use std::fs::File;
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::{
+    fs::File,
+    io::Read,
+    path::{Path, PathBuf},
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 pub struct AsyncFileReader {
     file: File,
