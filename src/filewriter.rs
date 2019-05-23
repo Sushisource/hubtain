@@ -1,15 +1,19 @@
 use failure::Error;
 use futures::{io::AsyncWrite, task::Context};
-use std::{fs::File, io, io::Write, path::Path, pin::Pin, task::Poll};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::{fs::File, io, io::Write, path::Path, pin::Pin, sync::atomic::AtomicUsize, task::Poll};
 
 pub struct AsyncFileWriter {
     file: File,
+    pub bytes_writen: Arc<AtomicUsize>,
 }
 
 impl AsyncFileWriter {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         Ok(AsyncFileWriter {
             file: File::create(&path)?,
+            bytes_writen: Arc::new(AtomicUsize::new(0)),
         })
     }
 }
@@ -21,6 +25,7 @@ impl AsyncWrite for AsyncFileWriter {
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
         let bytes_written = self.file.write(buf)?;
+        self.bytes_writen.fetch_add(bytes_written, Ordering::SeqCst);
         Poll::Ready(Ok(bytes_written))
     }
 

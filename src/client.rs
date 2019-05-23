@@ -1,12 +1,14 @@
-use crate::filewriter::AsyncFileWriter;
+use crate::{filewriter::AsyncFileWriter, BROADCAST_ADDR, LOG};
 use bincode::deserialize;
 use failure::Error;
-use futures::{compat::Future01CompatExt, io::AsyncReadExt, TryFutureExt};
+use futures::{compat::Future01CompatExt, io::AsyncReadExt, FutureExt as OFutureExt, TryFutureExt};
 use runtime::net::{TcpStream, UdpSocket};
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
-use tokio::prelude::FutureExt;
-
-use crate::{BROADCAST_ADDR, LOG};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::{
+    net::SocketAddr, path::PathBuf, sync::atomic::AtomicUsize, time::Duration, time::Instant,
+};
+use tokio::{prelude::FutureExt, timer::Delay};
 
 /// Client for hubtain's fetch mode
 pub struct DownloadClient {
@@ -50,8 +52,23 @@ impl DownloadClient {
     /// Tell the client to download the server's data to the provided location on disk
     pub async fn download_to_file(&mut self, path: PathBuf) -> Result<(), Error> {
         info!(LOG, "Starting download!");
+
         let mut as_fwriter = AsyncFileWriter::new(path.as_path())?;
-        self.stream.copy_into(&mut as_fwriter).await?;
+
+        let bytes_written_ref = as_fwriter.bytes_writen.clone();
+        let mut progress_fut = progress_counter(bytes_written_ref).boxed().fuse();
+        let mut download_fut = self.stream.copy_into(&mut as_fwriter).fuse();
+
+        select! {
+            _ = progress_fut => (),
+            _ = download_fut => ()
+        };
+
+        info!(
+            LOG,
+            "Downloaded {} bytes",
+            as_fwriter.bytes_writen.load(Ordering::Relaxed)
+        );
         info!(LOG, "...done!");
         Ok(())
     }
@@ -62,6 +79,20 @@ impl DownloadClient {
         let mut download = Vec::with_capacity(2056);
         self.stream.read_to_end(&mut download).await?;
         Ok(download)
+    }
+}
+
+async fn progress_counter(progress: Arc<AtomicUsize>) {
+    loop {
+        // The delay works best first to avoid printing a 0 for no reason
+        let _ = Delay::new(Instant::now() + Duration::from_millis(100))
+          .compat()
+          .await;
+        info!(
+            LOG,
+            "got {} bytes",
+            progress.as_ref().load(Ordering::Relaxed)
+        );
     }
 }
 
