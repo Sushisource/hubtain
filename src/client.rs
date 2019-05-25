@@ -9,6 +9,7 @@ use std::{
     net::SocketAddr, path::PathBuf, sync::atomic::AtomicUsize, time::Duration, time::Instant,
 };
 use tokio::{prelude::FutureExt, timer::Delay};
+use indicatif::ProgressBar;
 
 /// Client for hubtain's fetch mode
 pub struct DownloadClient {
@@ -93,17 +94,20 @@ impl DownloadClient {
 }
 
 async fn progress_counter(progress: Arc<AtomicUsize>, total_size: u64) {
+    let pbar = ProgressBar::new(total_size);
     loop {
         // The delay works best first to avoid printing a 0 for no reason
         let _ = Delay::new(Instant::now() + Duration::from_millis(100))
             .compat()
             .await;
-        info!(
-            LOG,
-            "got {}/{} bytes",
-            progress.as_ref().load(Ordering::Relaxed),
-            total_size
-        );
+        let bytes_read = progress.as_ref().load(Ordering::Relaxed);
+//        info!(
+//            LOG,
+//            "got {}/{} bytes",
+//            bytes_read,
+//            total_size
+//        );
+        pbar.set_position(bytes_read as u64);
     }
 }
 
