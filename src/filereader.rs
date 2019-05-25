@@ -10,6 +10,7 @@ use std::{
 
 pub struct AsyncFileReader {
     file: File,
+    pub file_size: u64,
     orig_path: PathBuf,
 }
 
@@ -17,6 +18,7 @@ impl Clone for AsyncFileReader {
     fn clone(&self) -> Self {
         AsyncFileReader {
             file: File::open(self.orig_path.as_path()).expect("Bwaaargh file open explosion"),
+            file_size: self.file_size,
             orig_path: self.orig_path.clone(),
         }
     }
@@ -24,8 +26,11 @@ impl Clone for AsyncFileReader {
 
 impl AsyncFileReader {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let file = File::open(&path)?;
+        let file_size = file.metadata()?.len();
         Ok(AsyncFileReader {
-            file: File::open(&path)?,
+            file,
+            file_size,
             orig_path: path.as_ref().to_path_buf(),
         })
     }

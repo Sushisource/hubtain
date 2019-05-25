@@ -1,4 +1,4 @@
-use crate::{filewriter::AsyncFileWriter, BROADCAST_ADDR, LOG};
+use crate::{filewriter::AsyncFileWriter, models::HandshakeReply, BROADCAST_ADDR, LOG};
 use bincode::deserialize;
 use failure::Error;
 use futures::{compat::Future01CompatExt, io::AsyncReadExt, FutureExt as OFutureExt, TryFutureExt};
@@ -13,6 +13,7 @@ use tokio::{prelude::FutureExt, timer::Delay};
 /// Client for hubtain's fetch mode
 pub struct DownloadClient {
     stream: TcpStream,
+    server_info: ServerInfo,
 }
 
 impl DownloadClient {
@@ -23,7 +24,7 @@ impl DownloadClient {
         server_selection_strategy: SrvPred,
     ) -> Result<Self, Error>
     where
-        SrvPred: FnMut(&ServerId) -> bool,
+        SrvPred: FnMut(&ServerInfo) -> bool,
     {
         let broadcast_addr = SocketAddr::new(*BROADCAST_ADDR, udp_port);
         info!(LOG, "Client broadcasting to {}", &broadcast_addr);
@@ -31,13 +32,17 @@ impl DownloadClient {
         client_s.set_broadcast(true)?;
         client_s.send_to(b"I'm a client!", broadcast_addr).await?;
         let replies = read_replies_for(&mut client_s, Duration::from_secs(1)).await?;
-        let replies: Result<Vec<ServerId>, Error> = replies
+        let replies: Result<Vec<ServerInfo>, Error> = replies
             .into_iter()
             .map(|(bytes, peer)| {
-                let (name, tcp_port): (String, u16) = deserialize(&bytes)?;
+                let server_info: HandshakeReply = deserialize(&bytes)?;
                 let mut tcp_sock_addr = peer;
-                tcp_sock_addr.set_port(tcp_port);
-                Ok(ServerId::new(name, tcp_sock_addr))
+                tcp_sock_addr.set_port(server_info.tcp_port);
+                Ok(ServerInfo::new(
+                    server_info.server_name,
+                    tcp_sock_addr,
+                    server_info.data_length,
+                ))
             })
             .collect();
         let replies = replies?;
@@ -46,7 +51,10 @@ impl DownloadClient {
         let selected_server = replies.into_iter().find(server_selection_strategy).unwrap();
         let stream = TcpStream::connect(selected_server.addr).await?;
         info!(LOG, "Client connected to server!");
-        Ok(DownloadClient { stream })
+        Ok(DownloadClient {
+            stream,
+            server_info: selected_server,
+        })
     }
 
     /// Tell the client to download the server's data to the provided location on disk
@@ -56,7 +64,9 @@ impl DownloadClient {
         let mut as_fwriter = AsyncFileWriter::new(path.as_path())?;
 
         let bytes_written_ref = as_fwriter.bytes_writen.clone();
-        let mut progress_fut = progress_counter(bytes_written_ref).boxed().fuse();
+        let mut progress_fut = progress_counter(bytes_written_ref, self.server_info.data_len)
+            .boxed()
+            .fuse();
         let mut download_fut = self.stream.copy_into(&mut as_fwriter).fuse();
 
         select! {
@@ -67,7 +77,7 @@ impl DownloadClient {
         info!(
             LOG,
             "Downloaded {} bytes",
-            as_fwriter.bytes_writen.load(Ordering::Relaxed)
+            as_fwriter.bytes_writen.load(Ordering::Relaxed),
         );
         info!(LOG, "...done!");
         Ok(())
@@ -82,30 +92,32 @@ impl DownloadClient {
     }
 }
 
-async fn progress_counter(progress: Arc<AtomicUsize>) {
+async fn progress_counter(progress: Arc<AtomicUsize>, total_size: u64) {
     loop {
         // The delay works best first to avoid printing a 0 for no reason
         let _ = Delay::new(Instant::now() + Duration::from_millis(100))
-          .compat()
-          .await;
+            .compat()
+            .await;
         info!(
             LOG,
-            "got {} bytes",
-            progress.as_ref().load(Ordering::Relaxed)
+            "got {}/{} bytes",
+            progress.as_ref().load(Ordering::Relaxed),
+            total_size
         );
     }
 }
 
 #[derive(new, Debug)]
 /// Identifying information of a server discovered on the network
-pub struct ServerId {
+pub struct ServerInfo {
     name: String,
     addr: SocketAddr,
+    data_len: u64,
 }
 
 #[cfg(test)]
 /// Server selection strategy for testing that just selects the first server
-pub fn test_srvr_sel(_: &ServerId) -> bool {
+pub fn test_srvr_sel(_: &ServerInfo) -> bool {
     true
 }
 

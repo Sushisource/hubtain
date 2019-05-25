@@ -1,5 +1,4 @@
-use crate::mnemonic::random_word;
-use crate::LOG;
+use crate::{mnemonic::random_word, models::HandshakeReply, LOG};
 use bincode::serialize;
 use failure::Error;
 use futures::io::{AsyncRead, AsyncReadExt};
@@ -17,6 +16,7 @@ where
     udp_sock: UdpSocket,
     tcp_sock: Option<TcpListener>,
     data: Option<T>,
+    data_length: u64,
     name: String,
 }
 
@@ -27,13 +27,20 @@ where
     /// Create a new `FileSrv` given UDP and TCP sockets to listen on and some data source to serve
     /// If `stay_alive` is false, the server will shut down after serving the data to the first
     /// client who downloads it.
-    pub fn new(udp_sock: UdpSocket, tcp_sock: TcpListener, data: T, stay_alive: bool) -> Self {
+    pub fn new(
+        udp_sock: UdpSocket,
+        tcp_sock: TcpListener,
+        data: T,
+        data_length: u64,
+        stay_alive: bool,
+    ) -> Self {
         let name = random_word();
         FileSrv {
             stay_alive,
             udp_sock,
             tcp_sock: Some(tcp_sock),
             data: Some(data),
+            data_length,
             name: name.to_string(),
         }
     }
@@ -59,8 +66,12 @@ where
             let (_, peer) = self.udp_sock.recv_from(&mut buf).await?;
             info!(LOG, "Client ping from {}", &peer);
             // Reply with name and tcp portnum
-            let portnum = serialize(&(&self.name, &tcp_port))?;
-            self.udp_sock.send_to(&portnum, &peer).await?;
+            let initial_info = serialize(&HandshakeReply {
+                server_name: self.name.clone(),
+                tcp_port,
+                data_length: self.data_length,
+            })?;
+            self.udp_sock.send_to(&initial_info, &peer).await?;
             if !self.stay_alive {
                 data_handle.await?;
                 info!(LOG, "Done serving!");

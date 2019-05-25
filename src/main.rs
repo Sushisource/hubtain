@@ -19,6 +19,7 @@ mod client;
 mod filereader;
 mod filewriter;
 mod mnemonic;
+mod models;
 mod server;
 
 use crate::client::DownloadClient;
@@ -97,7 +98,14 @@ async fn main() -> Result<(), Error> {
             let file_path = sc.value_of("FILE").unwrap();
             info!(LOG, "Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
-            let server = FileSrv::new(udp_sock, tcp_sock, serv_file, sc.is_present("stayalive"));
+            let file_siz = serv_file.file_size;
+            let server = FileSrv::new(
+                udp_sock,
+                tcp_sock,
+                serv_file,
+                file_siz,
+                sc.is_present("stayalive"),
+            );
             server.serve().await?;
         }
         ("fetch", Some(_)) => {
@@ -143,7 +151,7 @@ mod test {
         let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
-        let server = FileSrv::new(udp_sock, tcp_sock, TEST_DATA, false);
+        let server = FileSrv::new(udp_sock, tcp_sock, TEST_DATA, TEST_DATA.len() as u64, false);
         spawn(server.serve());
 
         let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
@@ -159,7 +167,8 @@ mod test {
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
-        let server = FileSrv::new(udp_sock, tcp_sock, test_file, false);
+        let file_siz = test_file.file_size;
+        let server = FileSrv::new(udp_sock, tcp_sock, test_file, file_siz, false);
         spawn(server.serve());
 
         let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
@@ -190,7 +199,8 @@ mod test {
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
-        let server = FileSrv::new(udp_sock, tcp_sock, test_file, true);
+        let file_siz = test_file.file_size;
+        let server = FileSrv::new(udp_sock, tcp_sock, test_file, file_siz, false);
         spawn(server.serve());
 
         let dl_futures = (1..100).map(async move |_| {
@@ -219,7 +229,8 @@ mod test {
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
-        let server = FileSrv::new(udp_sock, tcp_sock, test_file, false);
+        let file_siz = test_file.file_size;
+        let server = FileSrv::new(udp_sock, tcp_sock, test_file, file_siz, false);
         spawn(server.serve());
 
         let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
