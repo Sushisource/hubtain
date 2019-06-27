@@ -143,7 +143,6 @@ async fn read_replies_for(
             .await
         {
             Ok((_, peer)) => {
-                dbg!(&peer);
                 let cur_content = buf.to_vec();
                 retme.push((cur_content, peer));
             }

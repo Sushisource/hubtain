@@ -89,7 +89,7 @@ where
             info!(LOG, "Accepted download connection from {:?}", &addr);
             // TODO: Unneeded clone?
             let mut data_src = data.clone();
-            spawn(async move {
+            let _ = spawn(async move {
                 info!(LOG, "Client downloading!");
                 data_src.copy_into(&mut stream).await
             });

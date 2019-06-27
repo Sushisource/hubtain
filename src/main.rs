@@ -150,13 +150,14 @@ mod test {
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
         let server = FileSrv::new(udp_sock, tcp_sock, TEST_DATA, TEST_DATA.len() as u64, false);
-        spawn(server.serve());
+        let server_f = spawn(server.serve());
 
         let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
             .await
             .unwrap();
         let content = client.download_to_vec().await.unwrap();
         assert_eq!(content, TEST_DATA);
+        server_f.await.unwrap();
     }
 
     #[runtime::test(runtime_tokio::Tokio)]
@@ -167,7 +168,7 @@ mod test {
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
         let file_siz = test_file.file_size;
         let server = FileSrv::new(udp_sock, tcp_sock, test_file, file_siz, false);
-        spawn(server.serve());
+        let server_fut = spawn(server.serve());
 
         let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
             .await
@@ -189,6 +190,7 @@ mod test {
             .unwrap();
         assert_eq!(expected_dat, test_dat);
         std::fs::remove_file("testdata/tmp.small.txt").unwrap();
+        server_fut.await.unwrap();
     }
 
     #[runtime::test(runtime_tokio::Tokio)]
@@ -199,7 +201,7 @@ mod test {
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
         let file_siz = test_file.file_size;
         let server = FileSrv::new(udp_sock, tcp_sock, test_file, file_siz, true);
-        spawn(server.serve());
+        let _ = spawn(server.serve());
 
         let dl_futures = (1..100).map(async move |_| {
             let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
