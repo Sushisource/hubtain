@@ -1,7 +1,10 @@
 use crate::{filewriter::AsyncFileWriter, models::HandshakeReply, BROADCAST_ADDR, LOG};
 use bincode::deserialize;
-use failure::Error;
-use futures::{compat::Future01CompatExt, io::AsyncReadExt, FutureExt as OFutureExt, TryFutureExt};
+use failure::{err_msg, Error};
+use futures::{
+    compat::Future01CompatExt, io::AsyncReadExt, select, FutureExt as OFutureExt, TryFutureExt,
+};
+use indicatif::ProgressBar;
 use runtime::net::{TcpStream, UdpSocket};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -9,7 +12,6 @@ use std::{
     net::SocketAddr, path::PathBuf, sync::atomic::AtomicUsize, time::Duration, time::Instant,
 };
 use tokio::{prelude::FutureExt, timer::Delay};
-use indicatif::ProgressBar;
 
 /// Client for hubtain's fetch mode
 pub struct DownloadClient {
@@ -31,7 +33,8 @@ impl DownloadClient {
         info!(LOG, "Client broadcasting to {}", &broadcast_addr);
         let mut client_s = UdpSocket::bind("0.0.0.0:0")?;
         client_s.set_broadcast(true)?;
-        client_s.send_to(b"I'm a client!", broadcast_addr).await?;
+        let ping = vec![0];
+        client_s.send_to(&ping, broadcast_addr).await?;
         let replies = read_replies_for(&mut client_s, Duration::from_secs(1)).await?;
         let replies: Result<Vec<ServerInfo>, Error> = replies
             .into_iter()
@@ -48,6 +51,9 @@ impl DownloadClient {
             .collect();
         let replies = replies?;
         info!(LOG, "Client found the following servers: {:?}", &replies);
+        if replies.is_empty() {
+            return Err(err_msg("No servers found"));
+        }
         // Connect to the tcp port
         let selected_server = replies.into_iter().find(server_selection_strategy).unwrap();
         let stream = TcpStream::connect(selected_server.addr).await?;
@@ -101,12 +107,6 @@ async fn progress_counter(progress: Arc<AtomicUsize>, total_size: u64) {
             .compat()
             .await;
         let bytes_read = progress.as_ref().load(Ordering::Relaxed);
-//        info!(
-//            LOG,
-//            "got {}/{} bytes",
-//            bytes_read,
-//            total_size
-//        );
         pbar.set_position(bytes_read as u64);
     }
 }
@@ -143,6 +143,7 @@ async fn read_replies_for(
             .await
         {
             Ok((_, peer)) => {
+                dbg!(&peer);
                 let cur_content = buf.to_vec();
                 retme.push((cur_content, peer));
             }

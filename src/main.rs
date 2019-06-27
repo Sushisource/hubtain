@@ -2,8 +2,6 @@
 #![cfg_attr(test, allow(unused_imports))]
 
 #[macro_use]
-extern crate futures;
-#[macro_use]
 extern crate clap;
 #[macro_use]
 extern crate failure;
@@ -200,7 +198,7 @@ mod test {
         let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
         let file_siz = test_file.file_size;
-        let server = FileSrv::new(udp_sock, tcp_sock, test_file, file_siz, false);
+        let server = FileSrv::new(udp_sock, tcp_sock, test_file, file_siz, true);
         spawn(server.serve());
 
         let dl_futures = (1..100).map(async move |_| {
