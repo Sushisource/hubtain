@@ -1,5 +1,4 @@
 #![feature(async_await, test)]
-#![cfg_attr(test, allow(unused_imports))]
 
 #[macro_use]
 extern crate clap;
@@ -23,7 +22,6 @@ mod server;
 use crate::client::DownloadClient;
 use crate::filereader::AsyncFileReader;
 use crate::server::FileSrv;
-use broadcast_addr_picker::select_broadcast_addr;
 use clap::AppSettings;
 use colored::Colorize;
 use failure::Error;
@@ -140,7 +138,7 @@ mod test {
     use crate::client::test_srvr_sel;
     use crate::filereader::AsyncFileReader;
     use runtime::spawn;
-    use std::{fs::File, io::Read, time::Instant};
+    use std::{fs::File, io::Read};
 
     static TEST_DATA: &[u8] = b"Hi I'm data";
 
@@ -225,20 +223,22 @@ mod test {
     #[cfg(feature = "expensive_tests")]
     #[runtime::test(runtime_tokio::Tokio)]
     async fn large_file_transfer() {
+        use std::time::Instant;
+
         let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
         let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
         let file_siz = test_file.file_size;
         let server = FileSrv::new(udp_sock, tcp_sock, test_file, file_siz, false);
-        spawn(server.serve());
+        let _ = spawn(server.serve());
 
         let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
             .await
             .unwrap();
         let start = Instant::now();
         dbg!("Began transfer");
-        let content = client
+        client
             .download_to_file("testdata/tmpdownload".into())
             .await
             .unwrap();
