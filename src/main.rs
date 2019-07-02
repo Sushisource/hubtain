@@ -19,18 +19,17 @@ mod mnemonic;
 mod models;
 mod server;
 
-use crate::client::DownloadClient;
-use crate::filereader::AsyncFileReader;
-use crate::server::FileSrv;
+use crate::server::FileSrvBuilder;
+use crate::{client::DownloadClient, filereader::AsyncFileReader};
+#[cfg(not(test))]
+use broadcast_addr_picker::select_broadcast_addr;
 use clap::AppSettings;
 use colored::Colorize;
 use failure::Error;
-use runtime::net::{TcpListener, UdpSocket};
 use slog::Drain;
-use std::net::IpAddr;
 #[cfg(test)]
 use std::net::Ipv4Addr;
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
 
 #[cfg(not(test))]
 lazy_static! {
@@ -89,20 +88,15 @@ async fn main() -> Result<(), Error> {
 
     match matches.subcommand() {
         ("srv", Some(sc)) => {
-            let tcp_sock = TcpListener::bind("0.0.0.0:0")?;
-            let udp_sock = UdpSocket::bind(udp_srv_bind_addr(42444))?;
             let file_path = sc.value_of("FILE").unwrap();
             info!(LOG, "Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
             let file_siz = serv_file.file_size;
-            let server = FileSrv::new(
-                udp_sock,
-                tcp_sock,
-                serv_file,
-                file_siz,
-                sc.is_present("stayalive"),
-            );
-            server.serve().await?;
+            let fsrv = FileSrvBuilder::new(serv_file, file_siz)
+                .set_udp_port(42444)
+                .set_stayalive(sc.is_present("stayalive"))
+                .build()?;
+            fsrv.serve().await?;
         }
         ("fetch", Some(_)) => {
             // TODO: Interactive server selector
@@ -117,26 +111,12 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-#[cfg(target_family = "windows")]
-#[cfg(not(test))]
-fn udp_srv_bind_addr(port_num: usize) -> String {
-    format!("0.0.0.0:{}", port_num)
-}
-#[cfg(target_family = "unix")]
-#[cfg(not(test))]
-fn udp_srv_bind_addr(port_num: usize) -> String {
-    format!("192.168.0.255:{}", port_num)
-}
-#[cfg(test)]
-fn udp_srv_bind_addr(port_num: usize) -> String {
-    format!("127.0.0.1:{}", port_num)
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::client::test_srvr_sel;
     use crate::filereader::AsyncFileReader;
+    use crate::server::FileSrvBuilder;
     use runtime::spawn;
     use std::{fs::File, io::Read};
 
@@ -144,11 +124,11 @@ mod test {
 
     #[runtime::test(runtime_tokio::Tokio)]
     async fn basic_transfer() {
-        let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
-        let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let udp_port = udp_sock.local_addr().unwrap().port();
-        let server = FileSrv::new(udp_sock, tcp_sock, TEST_DATA, TEST_DATA.len() as u64, false);
-        let server_f = spawn(server.serve());
+        let fsrv = FileSrvBuilder::new(TEST_DATA, TEST_DATA.len() as u64)
+            .build()
+            .unwrap();
+        let udp_port = fsrv.udp_port().unwrap();
+        let server_f = spawn(fsrv.serve());
 
         let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
             .await
@@ -160,13 +140,11 @@ mod test {
 
     #[runtime::test(runtime_tokio::Tokio)]
     async fn single_small_file_transfer() {
-        let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
-        let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
         let file_siz = test_file.file_size;
-        let server = FileSrv::new(udp_sock, tcp_sock, test_file, file_siz, false);
-        let server_fut = spawn(server.serve());
+        let fsrv = FileSrvBuilder::new(test_file, file_siz).build().unwrap();
+        let udp_port = fsrv.udp_port().unwrap();
+        let server_f = spawn(fsrv.serve());
 
         let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
             .await
@@ -188,18 +166,19 @@ mod test {
             .unwrap();
         assert_eq!(expected_dat, test_dat);
         std::fs::remove_file("testdata/tmp.small.txt").unwrap();
-        server_fut.await.unwrap();
+        server_f.await.unwrap();
     }
 
     #[runtime::test(runtime_tokio::Tokio)]
     async fn multiple_small_file_transfer() {
-        let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
-        let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
         let file_siz = test_file.file_size;
-        let server = FileSrv::new(udp_sock, tcp_sock, test_file, file_siz, true);
-        let _ = spawn(server.serve());
+        let fsrv = FileSrvBuilder::new(test_file, file_siz)
+            .set_stayalive(true)
+            .build()
+            .unwrap();
+        let udp_port = fsrv.udp_port().unwrap();
+        let _ = spawn(fsrv.serve());
 
         let dl_futures = (1..100).map(async move |_| {
             let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
@@ -225,13 +204,13 @@ mod test {
     async fn large_file_transfer() {
         use std::time::Instant;
 
-        let tcp_sock = TcpListener::bind("127.0.0.1:0").unwrap();
-        let udp_sock = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let udp_port = udp_sock.local_addr().unwrap().port();
         let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
         let file_siz = test_file.file_size;
-        let server = FileSrv::new(udp_sock, tcp_sock, test_file, file_siz, false);
-        let _ = spawn(server.serve());
+        let fsrv = FileSrvBuilder::new(test_file, file_siz)
+          .build()
+          .unwrap();
+        let udp_port = fsrv.udp_port().unwrap();
+        let _ = spawn(fsrv.serve());
 
         let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
             .await

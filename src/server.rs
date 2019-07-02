@@ -80,6 +80,11 @@ where
         }
     }
 
+    /// Return the UDP port the server is bound to
+    pub fn udp_port(&self) -> Result<u16, Error> {
+        Ok(self.udp_sock.local_addr()?.port())
+    }
+
     /// The data srv runs independently of the main srv loop, and does the job of actually
     /// transferring data to clients.
     async fn data_srv(mut tcp_sock: TcpListener, data: T, stay_alive: bool) -> Result<(), Error> {
@@ -97,5 +102,73 @@ where
                 return Ok(());
             }
         }
+    }
+}
+
+pub struct FileSrvBuilder<T>
+where
+    T: 'static + AsyncRead + Send + Unpin + Clone,
+{
+    data: T,
+    data_len: u64,
+    udp_port: u16,
+    stay_alive: bool,
+    listen_addr: String,
+}
+
+#[cfg(not(test))]
+const DEFAULT_TCP_LISTEN_ADDR: &'static str = "0.0.0.0";
+#[cfg(test)]
+const DEFAULT_TCP_LISTEN_ADDR: &'static str = "127.0.0.1";
+
+#[cfg(target_family = "windows")]
+#[cfg(not(test))]
+fn udp_srv_bind_addr(port_num: u16) -> String {
+    format!("0.0.0.0:{}", port_num)
+}
+#[cfg(target_family = "unix")]
+#[cfg(not(test))]
+fn udp_srv_bind_addr(port_num: u16) -> String {
+    format!("192.168.0.255:{}", port_num)
+}
+#[cfg(test)]
+fn udp_srv_bind_addr(port_num: u16) -> String {
+    format!("127.0.0.1:{}", port_num)
+}
+
+impl<T> FileSrvBuilder<T>
+where
+    T: 'static + AsyncRead + Send + Unpin + Clone,
+{
+    pub fn new(data: T, data_len: u64) -> FileSrvBuilder<T> {
+        FileSrvBuilder {
+            data,
+            data_len,
+            udp_port: 0,
+            stay_alive: false,
+            listen_addr: DEFAULT_TCP_LISTEN_ADDR.to_string(),
+        }
+    }
+
+    pub fn set_udp_port(mut self, port: u16) -> Self {
+        self.udp_port = port;
+        self
+    }
+
+    pub fn set_stayalive(mut self, stayalive: bool) -> Self {
+        self.stay_alive = stayalive;
+        self
+    }
+
+    pub fn build(self) -> Result<FileSrv<T>, Error> {
+        let tcp_sock = TcpListener::bind(format!("{}:0", &self.listen_addr))?;
+        let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port))?;
+        Ok(FileSrv::new(
+            udp_sock,
+            tcp_sock,
+            self.data,
+            self.data_len,
+            self.stay_alive,
+        ))
     }
 }
