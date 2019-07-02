@@ -64,11 +64,25 @@ impl DownloadClient {
         })
     }
 
-    /// Tell the client to download the server's data to the provided location on disk
+    /// Tell the client to download the server's data to the provided location on disk. If the
+    /// location is a directory, the file's name will be determined by the server it's downloaded
+    /// from
     pub async fn download_to_file(&mut self, path: PathBuf) -> Result<(), Error> {
-        info!(LOG, "Starting download!");
+        let path = if path.is_dir() {
+            path.join(&self.server_info.name)
+        } else {
+            path
+        };
 
-        let mut as_fwriter = AsyncFileWriter::new(path.as_path())?;
+        if path.exists() {
+            // TODO: Allow override
+            return Err(err_msg("Refusing to overwrite existing file!"));
+        }
+
+        let path = path.as_path();
+        info!(LOG, "Downloading to {:?}", path.as_os_str());
+
+        let mut as_fwriter = AsyncFileWriter::new(path)?;
 
         let bytes_written_ref = as_fwriter.bytes_writen.clone();
         let mut progress_fut = progress_counter(bytes_written_ref, self.server_info.data_len)

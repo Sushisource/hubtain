@@ -29,6 +29,7 @@ use failure::Error;
 use slog::Drain;
 #[cfg(test)]
 use std::net::Ipv4Addr;
+use std::path::PathBuf;
 use std::{net::IpAddr, time::Duration};
 
 #[cfg(not(test))]
@@ -62,10 +63,13 @@ async fn main() -> Result<(), Error> {
         (@subcommand srv =>
             (about: "Server mode")
             (@arg FILE: +required "The file to serve")
-            (@arg stayalive: -s --stayalive "Server stays alive indefinitely rather than stopping after serving one file")
+            (@arg stayalive: -s --stayalive "Server stays alive indefinitely rather than stopping \
+                                             after serving one file")
         )
         (@subcommand fetch =>
             (about: "Client download mode")
+            (@arg FILE: "Where to save the downloaded file. Defaults to a file in the current \
+                         directory, named by the server it's downloaded from.")
         )
     )
     .setting(AppSettings::SubcommandRequiredElseHelp)
@@ -98,10 +102,14 @@ async fn main() -> Result<(), Error> {
                 .build()?;
             fsrv.serve().await?;
         }
-        ("fetch", Some(_)) => {
+        ("fetch", Some(sc)) => {
             // TODO: Interactive server selector
             let mut client = DownloadClient::connect(42444, |_| true).await?;
-            client.download_to_file("download".into()).await?;
+            let file_path = sc
+                .value_of("FILE")
+                .map(Into::into)
+                .unwrap_or_else(|| PathBuf::from("."));
+            client.download_to_file(file_path).await?;
             info!(LOG, "Download complete!");
         }
         _ => bail!("Unmatched subcommand"),
@@ -206,9 +214,7 @@ mod test {
 
         let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
         let file_siz = test_file.file_size;
-        let fsrv = FileSrvBuilder::new(test_file, file_siz)
-          .build()
-          .unwrap();
+        let fsrv = FileSrvBuilder::new(test_file, file_siz).build().unwrap();
         let udp_port = fsrv.udp_port().unwrap();
         let _ = spawn(fsrv.serve());
 

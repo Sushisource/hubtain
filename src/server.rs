@@ -117,9 +117,9 @@ where
 }
 
 #[cfg(not(test))]
-const DEFAULT_TCP_LISTEN_ADDR: &'static str = "0.0.0.0";
+const DEFAULT_TCP_LISTEN_ADDR: &str = "0.0.0.0";
 #[cfg(test)]
-const DEFAULT_TCP_LISTEN_ADDR: &'static str = "127.0.0.1";
+const DEFAULT_TCP_LISTEN_ADDR: &str = "127.0.0.1";
 
 #[cfg(target_family = "windows")]
 #[cfg(not(test))]
