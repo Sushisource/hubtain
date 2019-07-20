@@ -1,4 +1,4 @@
-#![feature(async_await, test)]
+#![feature(async_await, test, async_closure, fixed_size_array)]
 
 #[macro_use]
 extern crate clap;
@@ -17,6 +17,7 @@ mod filereader;
 mod filewriter;
 mod mnemonic;
 mod models;
+mod ossuary_stream;
 mod server;
 
 use crate::server::FileSrvBuilder;
@@ -63,7 +64,8 @@ async fn main() -> Result<(), Error> {
         (@subcommand srv =>
             (about: "Server mode")
             (@arg FILE: +required "The file to serve")
-            (@arg stayalive: -s --stayalive "Server stays alive indefinitely rather than stopping \
+            (@arg stayalive: --no-encryption "Disable encryption")
+            (@arg encryption: -s --stayalive "Server stays alive indefinitely rather than stopping \
                                              after serving one file")
         )
         (@subcommand fetch =>
@@ -99,6 +101,7 @@ async fn main() -> Result<(), Error> {
             let fsrv = FileSrvBuilder::new(serv_file, file_siz)
                 .set_udp_port(42444)
                 .set_stayalive(sc.is_present("stayalive"))
+                .set_encryption(sc.is_present("encryption"))
                 .build()?;
             fsrv.serve().await?;
         }
@@ -133,6 +136,23 @@ mod test {
     #[runtime::test(runtime_tokio::Tokio)]
     async fn basic_transfer() {
         let fsrv = FileSrvBuilder::new(TEST_DATA, TEST_DATA.len() as u64)
+            .build()
+            .unwrap();
+        let udp_port = fsrv.udp_port().unwrap();
+        let server_f = spawn(fsrv.serve());
+
+        let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
+            .await
+            .unwrap();
+        let content = client.download_to_vec().await.unwrap();
+        assert_eq!(content, TEST_DATA);
+        server_f.await.unwrap();
+    }
+
+    #[runtime::test(runtime_tokio::Tokio)]
+    async fn encrypted_transfer() {
+        let fsrv = FileSrvBuilder::new(TEST_DATA, TEST_DATA.len() as u64)
+            .set_encryption(true)
             .build()
             .unwrap();
         let udp_port = fsrv.udp_port().unwrap();

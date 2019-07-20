@@ -2,10 +2,14 @@ use crate::{mnemonic::random_word, models::HandshakeReply, LOG};
 use bincode::serialize;
 use failure::Error;
 use futures::io::{AsyncRead, AsyncReadExt};
+use ossuary::{ConnectionType, OssuaryConnection, OssuaryError};
 use runtime::{
     net::{TcpListener, UdpSocket},
     spawn,
 };
+use std::array::FixedSizeArray;
+use crate::ossuary_stream::OssuaryStream;
+use runtime::task::JoinHandle;
 
 /// File server for hubtain's srv mode
 pub struct FileSrv<T>
@@ -18,6 +22,7 @@ where
     data: Option<T>,
     data_length: u64,
     name: String,
+    encrypted: bool,
 }
 
 impl<T> FileSrv<T>
@@ -33,6 +38,7 @@ where
         data: T,
         data_length: u64,
         stay_alive: bool,
+        encrypted: bool,
     ) -> Self {
         let name = random_word();
         FileSrv {
@@ -42,6 +48,7 @@ where
             data: Some(data),
             data_length,
             name: name.to_string(),
+            encrypted,
         }
     }
 
@@ -58,6 +65,14 @@ where
             self.tcp_sock.take().unwrap(),
             self.data.take().unwrap(),
             self.stay_alive,
+            match self.encrypted {
+                true => {
+                    // TODO: stupid error conversion
+                    let kp = ossuary::generate_auth_keypair().unwrap();
+                    Some(kp)
+                }
+                false => None,
+            },
         ));
 
         // Wait for broadcast from peer
@@ -70,6 +85,7 @@ where
                 server_name: self.name.clone(),
                 tcp_port,
                 data_length: self.data_length,
+                encrypted: self.encrypted,
             })?;
             self.udp_sock.send_to(&initial_info, &peer).await?;
             if !self.stay_alive {
@@ -87,16 +103,37 @@ where
 
     /// The data srv runs independently of the main srv loop, and does the job of actually
     /// transferring data to clients.
-    async fn data_srv(mut tcp_sock: TcpListener, data: T, stay_alive: bool) -> Result<(), Error> {
+    async fn data_srv(
+        mut tcp_sock: TcpListener,
+        data: T,
+        stay_alive: bool,
+        maybe_kp: Option<OssuaryKey>,
+    ) -> Result<(), DataSrvErr> {
         info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
         loop {
             let (mut stream, addr) = tcp_sock.accept().await?;
             info!(LOG, "Accepted download connection from {:?}", &addr);
             // TODO: Unneeded clone?
             let mut data_src = data.clone();
-            let _ = spawn(async move {
+            let _: JoinHandle<Result<(), DataSrvErr>> = spawn(async move {
+                let ossuary = OssuaryConnection::new(
+                    ConnectionType::UnauthenticatedServer,
+                    maybe_kp.as_ref().map(|kp| kp.0.as_slice()),
+                )?;
+                let mut oss_stream = OssuaryStream::new(&mut stream);
+                // Do encryption handshake
+                oss_stream.handshake()?;
+//                loop {
+//                    if !ossuary.handshake_done()? {
+//                        ossuary.recv_handshake(&stream);
+//                    } else {
+//                        break;
+//                    }
+//                }
+
                 info!(LOG, "Client downloading!");
-                data_src.copy_into(&mut stream).await
+                data_src.copy_into(&mut oss_stream).await;
+                Ok(())
             });
             if !stay_alive {
                 return Ok(());
@@ -104,6 +141,29 @@ where
         }
     }
 }
+
+#[derive(Debug, Fail)]
+pub enum DataSrvErr {
+    // TODO: Clean
+    #[fail(display = "Osserr")]
+    OssuaryErr(OssuaryError),
+    #[fail(display = "IOerr")]
+    IOErr(std::io::Error)
+}
+
+impl From<OssuaryError> for DataSrvErr {
+    fn from(e: OssuaryError) -> Self {
+        DataSrvErr::OssuaryErr(e)
+    }
+}
+
+impl From<std::io::Error> for DataSrvErr {
+    fn from(e: std::io::Error) -> Self {
+        DataSrvErr::IOErr(e)
+    }
+}
+
+type OssuaryKey = ([u8; 32], [u8; 32]);
 
 pub struct FileSrvBuilder<T>
 where
@@ -113,6 +173,7 @@ where
     data_len: u64,
     udp_port: u16,
     stay_alive: bool,
+    encryption: bool,
     listen_addr: String,
 }
 
@@ -146,6 +207,7 @@ where
             data_len,
             udp_port: 0,
             stay_alive: false,
+            encryption: false,
             listen_addr: DEFAULT_TCP_LISTEN_ADDR.to_string(),
         }
     }
@@ -160,6 +222,11 @@ where
         self
     }
 
+    pub fn set_encryption(mut self, encryption: bool) -> Self {
+        self.encryption = encryption;
+        self
+    }
+
     pub fn build(self) -> Result<FileSrv<T>, Error> {
         let tcp_sock = TcpListener::bind(format!("{}:0", &self.listen_addr))?;
         let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port))?;
@@ -169,6 +236,7 @@ where
             self.data,
             self.data_len,
             self.stay_alive,
+            self.encryption,
         ))
     }
 }

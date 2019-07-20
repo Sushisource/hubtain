@@ -46,6 +46,7 @@ impl DownloadClient {
                     server_info.server_name,
                     tcp_sock_addr,
                     server_info.data_length,
+                    server_info.encrypted,
                 ))
             })
             .collect();
@@ -131,6 +132,7 @@ pub struct ServerInfo {
     name: String,
     addr: SocketAddr,
     data_len: u64,
+    encrypted: bool,
 }
 
 #[cfg(test)]
