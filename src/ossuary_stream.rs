@@ -28,6 +28,7 @@ where
         let cheap_hack = if self.ossuary_conn.is_server() {
             "Server"
         } else {
+            // TODO: Why the fuck is server not even getting these
             self.underlying.write_all(&[1,2,3]).await?;
             "Client"
         };
@@ -48,6 +49,7 @@ where
                 }
 
                 println!("{} done send, start rcv handshake", cheap_hack);
+                // TODO: Why is this ALWAYS reading 0 bytes?
                 dbg!(self.underlying.read(rb.get_mut()).await?);
                 dbg!(&rb);
                 println!("{} did underlying read", cheap_hack);
