@@ -60,7 +60,12 @@ impl DownloadClient {
         // Connect to the tcp port
         let selected_server = replies.into_iter().find(server_selection_strategy).unwrap();
         let stream = TcpStream::connect(selected_server.addr).await?;
-        info!(LOG, "Client connected to server!");
+        info!(
+            LOG,
+            "Client on {:?} connected to server at {:?}!",
+            stream.local_addr(),
+            stream.peer_addr()
+        );
         Ok(DownloadClient {
             stream,
             server_info: selected_server,
@@ -116,7 +121,17 @@ impl DownloadClient {
         let mut oss_stream = OssuaryStream::new(&mut self.stream, oss_conn);
         info!(LOG, "Client handshaking");
         oss_stream.handshake().await?;
-        oss_stream.read_to_end(&mut download).await?;
+        //        loop {
+        let bytes_read = oss_stream.read_to_end(&mut download).await?;
+        dbg!(bytes_read);
+        //            if bytes_read > 0 {
+        //                break
+        //            }
+        //            // TODO: Don't do this crap. Do check bytes read==expected.
+        //            let _ = Delay::new(Instant::now() + Duration::from_millis(100))
+        //                .compat()
+        //                .await;
+        //        }
         Ok(download)
     }
 }

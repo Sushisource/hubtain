@@ -160,8 +160,9 @@ mod test {
             .await
             .unwrap();
         let content = client.download_to_vec().await.unwrap();
-        assert_eq!(content, TEST_DATA);
         server_f.await.unwrap();
+        dbg!(hex::encode(&TEST_DATA));
+        assert_eq!(content, TEST_DATA);
     }
 
     #[runtime::test(runtime_tokio::Tokio)]

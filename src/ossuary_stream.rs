@@ -28,44 +28,47 @@ where
         let cheap_hack = if self.ossuary_conn.is_server() {
             "Server"
         } else {
-            // TODO: Why the fuck is server not even getting these
-            self.underlying.write_all(&[1,2,3]).await?;
             "Client"
         };
-        let mut rb = Cursor::new(Vec::with_capacity(1024));
         loop {
-            if !self.ossuary_conn.handshake_done().map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Ossuary handshake err {:?}", e),
-                )
-            })? {
-                println!("{} send handshake", cheap_hack);
-                let mut wb = Vec::with_capacity(1024);
-                let siz = self.ossuary_conn.send_handshake(&mut wb)?;
-                if siz > 0 {
-                    dbg!(&cheap_hack, &wb);
-                    self.underlying.write_all(&mut wb).await?;
-                }
-
-                println!("{} done send, start rcv handshake", cheap_hack);
-                // TODO: Why is this ALWAYS reading 0 bytes?
-                dbg!(self.underlying.read(rb.get_mut()).await?);
-                dbg!(&rb);
-                println!("{} did underlying read", cheap_hack);
-                match self.ossuary_conn.recv_handshake(&mut rb) {
-                    Err(OssuaryError::WouldBlock(_)) => continue,
-                    o => {
-                        o?;
+            println!("{} start loop", cheap_hack);
+            match self.ossuary_conn.handshake_done() {
+                Ok(false) => {
+                    println!("{} send handshake", cheap_hack);
+                    let mut wb = Vec::with_capacity(1024);
+                    let siz = self.ossuary_conn.send_handshake(&mut wb)?;
+                    if siz > 0 {
+                        self.underlying.write_all(&mut wb).await?;
                     }
-                }
 
-                println!("{} loop done", cheap_hack);
-            } else {
-                break;
+                    println!("{} done send, start rcv handshake", cheap_hack);
+                    let mut rb = vec![0; 512];
+                    let bytes_read_from_stream = self.underlying.read(&mut rb).await?;
+                    dbg!(cheap_hack, bytes_read_from_stream);
+                    println!("{} done underlying read", cheap_hack);
+                    if bytes_read_from_stream > 0 {
+                        dbg!(cheap_hack, hex::encode(&rb));
+                        let mut rb = Cursor::new(rb);
+                        let bytes_read_for_shake = self.ossuary_conn.recv_handshake(&mut rb)?;
+                        println!("{} done rcv handshake", cheap_hack);
+                        dbg!(cheap_hack, bytes_read_for_shake);
+                        // TODO: Is this really invariant?
+                        assert_eq!(bytes_read_from_stream, bytes_read_for_shake);
+                    }
+
+                    println!("{} loop done", cheap_hack);
+                    continue;
+                }
+                Ok(true) => break,
+                Err(OssuaryError::UntrustedServer(pubkey)) => {
+                    let keys: Vec<&[u8]> = vec![&pubkey];
+                    self.ossuary_conn.add_authorized_keys(keys)?;
+                    continue;
+                }
+                e @ Err(_) => return e.map(|_| ()),
             }
         }
-        println!("Done handshaking!!!");
+        println!("{} done handshaking!!!", cheap_hack);
         self.handshake_complete = true;
         Ok(())
     }
