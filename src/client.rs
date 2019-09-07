@@ -1,3 +1,4 @@
+use crate::ossuary_stream::OssuaryStream;
 use crate::{filewriter::AsyncFileWriter, models::HandshakeReply, BROADCAST_ADDR, LOG};
 use bincode::deserialize;
 use failure::{err_msg, Error};
@@ -5,6 +6,7 @@ use futures::{
     compat::Future01CompatExt, io::AsyncReadExt, select, FutureExt as OFutureExt, TryFutureExt,
 };
 use indicatif::ProgressBar;
+use ossuary::{ConnectionType, OssuaryConnection, OssuaryError};
 use runtime::net::{TcpStream, UdpSocket};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -67,8 +69,8 @@ impl DownloadClient {
 
     /// Tell the client to download the server's data to the provided location on disk. If the
     /// location is a directory, the file's name will be determined by the server it's downloaded
-    /// from
-    pub async fn download_to_file(&mut self, path: PathBuf) -> Result<(), Error> {
+    /// from. This consumes the client.
+    pub async fn download_to_file(self, path: PathBuf) -> Result<(), Error> {
         let path = if path.is_dir() {
             path.join(&self.server_info.name)
         } else {
@@ -107,9 +109,14 @@ impl DownloadClient {
 
     /// For testing - downloads server data to a vec
     #[cfg(test)]
-    pub async fn download_to_vec(&mut self) -> std::io::Result<Vec<u8>> {
+    pub async fn download_to_vec(&mut self) -> Result<Vec<u8>, ClientErr> {
         let mut download = Vec::with_capacity(2056);
-        self.stream.read_to_end(&mut download).await?;
+        // TODO: This will need to be deduped with how it'll work in download_to_file
+        let oss_conn = OssuaryConnection::new(ConnectionType::Client, None)?;
+        let mut oss_stream = OssuaryStream::new(&mut self.stream, oss_conn);
+        info!(LOG, "Client handshaking");
+        oss_stream.handshake().await?;
+        oss_stream.read_to_end(&mut download).await?;
         Ok(download)
     }
 }
@@ -123,6 +130,27 @@ async fn progress_counter(progress: Arc<AtomicUsize>, total_size: u64) {
             .await;
         let bytes_read = progress.as_ref().load(Ordering::Relaxed);
         pbar.set_position(bytes_read as u64);
+    }
+}
+
+#[derive(Debug, Fail)]
+pub enum ClientErr {
+    // TODO: Clean / snafu / whatever
+    #[fail(display = "Osserr")]
+    OssuaryErr(OssuaryError),
+    #[fail(display = "IOerr")]
+    IOErr(std::io::Error),
+}
+
+impl From<OssuaryError> for ClientErr {
+    fn from(e: OssuaryError) -> Self {
+        ClientErr::OssuaryErr(e)
+    }
+}
+
+impl From<std::io::Error> for ClientErr {
+    fn from(e: std::io::Error) -> Self {
+        ClientErr::IOErr(e)
     }
 }
 

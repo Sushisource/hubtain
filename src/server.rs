@@ -1,15 +1,14 @@
-use crate::{mnemonic::random_word, models::HandshakeReply, LOG};
+use crate::ossuary_stream::OssuaryKey;
+use crate::{mnemonic::random_word, models::HandshakeReply, ossuary_stream::OssuaryStream, LOG};
 use bincode::serialize;
 use failure::Error;
 use futures::io::{AsyncRead, AsyncReadExt};
 use ossuary::{ConnectionType, OssuaryConnection, OssuaryError};
+use runtime::task::JoinHandle;
 use runtime::{
     net::{TcpListener, UdpSocket},
     spawn,
 };
-use std::array::FixedSizeArray;
-use crate::ossuary_stream::OssuaryStream;
-use runtime::task::JoinHandle;
 
 /// File server for hubtain's srv mode
 pub struct FileSrv<T>
@@ -114,28 +113,24 @@ where
             let (mut stream, addr) = tcp_sock.accept().await?;
             info!(LOG, "Accepted download connection from {:?}", &addr);
             // TODO: Unneeded clone?
-            let mut data_src = data.clone();
-            let _: JoinHandle<Result<(), DataSrvErr>> = spawn(async move {
-                let ossuary = OssuaryConnection::new(
+            let data_src = data.clone();
+            // TODO: Don't use ossuary stream when not encrypted mode
+            let h: JoinHandle<Result<(), DataSrvErr>> = spawn(async move {
+                let oss_conn = OssuaryConnection::new(
                     ConnectionType::UnauthenticatedServer,
-                    maybe_kp.as_ref().map(|kp| kp.0.as_slice()),
+                    maybe_kp.as_ref().map(|x| x.0.as_ref()),
                 )?;
-                let mut oss_stream = OssuaryStream::new(&mut stream);
-                // Do encryption handshake
-                oss_stream.handshake()?;
-//                loop {
-//                    if !ossuary.handshake_done()? {
-//                        ossuary.recv_handshake(&stream);
-//                    } else {
-//                        break;
-//                    }
-//                }
-
+                let mut oss_stream = OssuaryStream::new(&mut stream, oss_conn);
+                info!(LOG, "Server handshaking");
+                oss_stream.handshake().await?;
                 info!(LOG, "Client downloading!");
-                data_src.copy_into(&mut oss_stream).await;
+                data_src.copy_into(&mut oss_stream).await?;
                 Ok(())
             });
             if !stay_alive {
+                // TODO: Does this screw up multi client mode?
+                h.await?;
+                info!(LOG, "I'M MELLLLLLTIIIIING");
                 return Ok(());
             }
         }
@@ -144,11 +139,11 @@ where
 
 #[derive(Debug, Fail)]
 pub enum DataSrvErr {
-    // TODO: Clean
+    // TODO: Clean / snafu / whatever
     #[fail(display = "Osserr")]
     OssuaryErr(OssuaryError),
     #[fail(display = "IOerr")]
-    IOErr(std::io::Error)
+    IOErr(std::io::Error),
 }
 
 impl From<OssuaryError> for DataSrvErr {
@@ -162,8 +157,6 @@ impl From<std::io::Error> for DataSrvErr {
         DataSrvErr::IOErr(e)
     }
 }
-
-type OssuaryKey = ([u8; 32], [u8; 32]);
 
 pub struct FileSrvBuilder<T>
 where

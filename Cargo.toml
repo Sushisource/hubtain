@@ -8,14 +8,14 @@ edition = "2018"
 clap = "2"
 derive-new = "0.5"
 indicatif = "0.11"
-runtime = "0.3.0-alpha.6"
+runtime = "0.3.0-alpha.7"
 runtime-attributes = "0.3.0-alpha.2"
 runtime-raw = "0.3.0-alpha.2"
 runtime-native = "0.3.0-alpha.2"
 runtime-tokio = "0.3.0-alpha.2"
 tokio = "0.1"
-futures-preview = { version = "=0.3.0-alpha.16", features = ["io-compat", "async-await", "nightly"] }
-futures-select-macro-preview = "0.3.0-alpha.16"
+futures-preview = { version = "=0.3.0-alpha.18", features = ["io-compat", "async-await", "nightly"] }
+futures-select-macro-preview = "0.3.0-alpha.18"
 failure = "0.1"
 futures01 = { package = "futures", version = "0.1" }
 get_if_addrs = "0.5"

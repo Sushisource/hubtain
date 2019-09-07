@@ -107,7 +107,7 @@ async fn main() -> Result<(), Error> {
         }
         ("fetch", Some(sc)) => {
             // TODO: Interactive server selector
-            let mut client = DownloadClient::connect(42444, |_| true).await?;
+            let client = DownloadClient::connect(42444, |_| true).await?;
             let file_path = sc
                 .value_of("FILE")
                 .map(Into::into)
@@ -125,9 +125,7 @@ async fn main() -> Result<(), Error> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::client::test_srvr_sel;
-    use crate::filereader::AsyncFileReader;
-    use crate::server::FileSrvBuilder;
+    use crate::{client::test_srvr_sel, filereader::AsyncFileReader, server::FileSrvBuilder};
     use runtime::spawn;
     use std::{fs::File, io::Read};
 
@@ -174,7 +172,7 @@ mod test {
         let udp_port = fsrv.udp_port().unwrap();
         let server_f = spawn(fsrv.serve());
 
-        let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
+        let client = DownloadClient::connect(udp_port, test_srvr_sel)
             .await
             .unwrap();
         client
