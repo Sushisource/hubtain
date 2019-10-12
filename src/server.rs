@@ -1,6 +1,6 @@
 use crate::{mnemonic::random_word, models::HandshakeReply, encrypted_stream::EncryptedStream, LOG};
 use bincode::serialize;
-use failure::Error;
+use anyhow::Error;
 use futures::io::{AsyncRead, AsyncReadExt};
 use runtime::{
     task::JoinHandle,
@@ -8,7 +8,7 @@ use runtime::{
     spawn
 };
 use rand::rngs::OsRng;
-use x25519_dalek::EphemeralSecret;
+use x25519_dalek::{EphemeralSecret, PublicKey};
 
 /// File server for hubtain's srv mode
 pub struct FileSrv<T>
@@ -108,16 +108,18 @@ impl<T> FileSrv<T>
         data: T,
         stay_alive: bool,
         maybe_kp: Option<EphemeralSecret>,
-    ) -> Result<(), DataSrvErr> {
+    ) -> Result<(), Error> {
         info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
+        // TODO: Generate if not passed in
+        let pubkey = PublicKey::from(&maybe_kp.unwrap());
         loop {
             let (mut stream, addr) = tcp_sock.accept().await?;
             info!(LOG, "Accepted download connection from {:?}", &addr);
             // TODO: Unneeded clone?
             let data_src = data.clone();
             // TODO: Don't use ossuary stream when not encrypted mode
-            let h: JoinHandle<Result<(), DataSrvErr>> = spawn(async move {
-                let mut oss_stream = EncryptedStream::new(&mut stream);
+            let h: JoinHandle<Result<(), Error>> = spawn(async move {
+                let mut oss_stream = EncryptedStream::new(&mut stream, pubkey);
                 info!(LOG, "Server handshaking");
                 oss_stream.handshake().await?;
                 info!(LOG, "Client downloading!");
@@ -131,19 +133,6 @@ impl<T> FileSrv<T>
                 return Ok(());
             }
         }
-    }
-}
-
-#[derive(Debug, Fail)]
-pub enum DataSrvErr {
-    // TODO: Clean / snafu / whatever
-    #[fail(display = "IOerr")]
-    IOErr(std::io::Error),
-}
-
-impl From<std::io::Error> for DataSrvErr {
-    fn from(e: std::io::Error) -> Self {
-        DataSrvErr::IOErr(e)
     }
 }
 

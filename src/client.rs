@@ -1,18 +1,28 @@
 use crate::encrypted_stream::EncryptedStream;
 use crate::{filewriter::AsyncFileWriter, models::HandshakeReply, BROADCAST_ADDR, LOG};
 use bincode::deserialize;
-use failure::{err_msg, Error};
+use anyhow::{Error, anyhow};
 use futures::{
     compat::Future01CompatExt, io::AsyncReadExt, select, FutureExt as OFutureExt, TryFutureExt,
 };
 use indicatif::ProgressBar;
 use runtime::net::{TcpStream, UdpSocket};
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::{
-    net::SocketAddr, path::PathBuf, sync::atomic::AtomicUsize, time::Duration, time::Instant,
+    sync::{
+        atomic::Ordering,
+        Arc,
+        atomic::AtomicUsize
+    },
+    net::SocketAddr,
+    path::PathBuf,
+    time::{
+        Duration,
+        Instant
+    }
 };
 use tokio::{prelude::FutureExt, timer::Delay};
+use x25519_dalek::{EphemeralSecret, PublicKey};
+use rand::rngs::OsRng;
 
 /// Client for hubtain's fetch mode
 pub struct DownloadClient {
@@ -54,7 +64,7 @@ impl DownloadClient {
         let replies = replies?;
         info!(LOG, "Client found the following servers: {:?}", &replies);
         if replies.is_empty() {
-            return Err(err_msg("No servers found"));
+            return Err(anyhow!("No servers found"));
         }
         // Connect to the tcp port
         let selected_server = replies.into_iter().find(server_selection_strategy).unwrap();
@@ -83,7 +93,7 @@ impl DownloadClient {
 
         if path.exists() {
             // TODO: Allow override
-            return Err(err_msg("Refusing to overwrite existing file!"));
+            return Err(anyhow!("Refusing to overwrite existing file!"));
         }
 
         let path = path.as_path();
@@ -113,14 +123,16 @@ impl DownloadClient {
 
     /// For testing - downloads server data to a vec
     #[cfg(test)]
-    pub async fn download_to_vec(&mut self) -> Result<Vec<u8>, ClientErr> {
+    pub async fn download_to_vec(&mut self) -> Result<Vec<u8>, Error> {
         let mut download = Vec::with_capacity(2056);
         // TODO: This will need to be deduped with how it'll work in download_to_file
-        let mut oss_stream = EncryptedStream::new(&mut self.stream);
+        let mut rng = OsRng::new().unwrap();
+        let secret = EphemeralSecret::new(&mut rng);
+        let mut enc_stream = EncryptedStream::new(&mut self.stream, PublicKey::from(&secret));
         info!(LOG, "Client handshaking");
-        oss_stream.handshake().await?;
+        enc_stream.handshake().await?;
         //        loop {
-        let bytes_read = oss_stream.read_to_end(&mut download).await?;
+        let bytes_read = enc_stream.read_to_end(&mut download).await?;
         dbg!(bytes_read);
         //            if bytes_read > 0 {
         //                break
@@ -143,19 +155,6 @@ async fn progress_counter(progress: Arc<AtomicUsize>, total_size: u64) {
             .await;
         let bytes_read = progress.as_ref().load(Ordering::Relaxed);
         pbar.set_position(bytes_read as u64);
-    }
-}
-
-#[derive(Debug, Fail)]
-pub enum ClientErr {
-    // TODO: Clean / snafu / whatever
-    #[fail(display = "IOerr")]
-    IOErr(std::io::Error),
-}
-
-impl From<std::io::Error> for ClientErr {
-    fn from(e: std::io::Error) -> Self {
-        ClientErr::IOErr(e)
     }
 }
 

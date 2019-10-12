@@ -1,4 +1,4 @@
-use failure::Error;
+use anyhow::Error;
 use futures::io::AsyncRead;
 use std::{
     fs::File,

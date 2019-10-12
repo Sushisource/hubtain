@@ -1,23 +1,38 @@
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use std::{io, io::Cursor, pin::Pin, task::Poll};
+use x25519_dalek::PublicKey;
+use serde::{Deserialize, Serialize};
 
 pub struct EncryptedStream<'a, S: AsyncWrite + AsyncRead> {
     underlying: Pin<&'a mut S>,
     handshake_complete: bool,
+    pubkey: PublicKey
+}
+
+#[derive(Serialize, Deserialize)]
+struct Handshake {
+    pkey: [u8; 32]
 }
 
 impl<'a, S> EncryptedStream<'a, S>
 where
     S: AsyncWrite + AsyncRead + Unpin,
 {
-    pub fn new(underlying_stream: &'a mut S ) -> Self {
+    pub fn new(underlying_stream: &'a mut S , pubkey: PublicKey) -> Self {
         EncryptedStream {
             underlying: Pin::new(underlying_stream),
             handshake_complete: false,
+            pubkey
         }
     }
 
-    pub async fn handshake(&mut self) -> Result<(), std::io::Error> {
+    pub async fn handshake(&mut self) -> Result<(), anyhow::Error> {
+        // Exchange public keys
+        let send_hs = bincode::serialize(&Handshake {
+            pkey: *self.pubkey.as_bytes()
+        })?;
+        self.underlying.write_all(send_hs.as_slice());
+
         self.handshake_complete = true;
         Ok(())
     }
@@ -62,3 +77,5 @@ where
         self.underlying.as_mut().poll_read(cx, buf)
     }
 }
+
+

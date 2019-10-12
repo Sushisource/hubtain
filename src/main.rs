@@ -3,8 +3,6 @@
 #[macro_use]
 extern crate clap;
 #[macro_use]
-extern crate failure;
-#[macro_use]
 extern crate slog;
 #[macro_use]
 extern crate lazy_static;
@@ -26,7 +24,7 @@ use crate::{client::DownloadClient, filereader::AsyncFileReader};
 use broadcast_addr_picker::select_broadcast_addr;
 use clap::AppSettings;
 use colored::Colorize;
-use failure::Error;
+use anyhow::{Error, anyhow};
 use slog::Drain;
 #[cfg(test)]
 use std::net::Ipv4Addr;
@@ -115,7 +113,7 @@ async fn main() -> Result<(), Error> {
             client.download_to_file(file_path).await?;
             info!(LOG, "Download complete!");
         }
-        _ => bail!("Unmatched subcommand"),
+        _ => return Err(anyhow!("Unmatched subcommand")),
     }
     // Wait a beat to finish printing any async logging
     std::thread::sleep(Duration::from_millis(100));
