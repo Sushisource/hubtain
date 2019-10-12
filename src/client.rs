@@ -1,4 +1,4 @@
-use crate::ossuary_stream::OssuaryStream;
+use crate::encrypted_stream::EncryptedStream;
 use crate::{filewriter::AsyncFileWriter, models::HandshakeReply, BROADCAST_ADDR, LOG};
 use bincode::deserialize;
 use failure::{err_msg, Error};
@@ -6,7 +6,6 @@ use futures::{
     compat::Future01CompatExt, io::AsyncReadExt, select, FutureExt as OFutureExt, TryFutureExt,
 };
 use indicatif::ProgressBar;
-use ossuary::{ConnectionType, OssuaryConnection, OssuaryError};
 use runtime::net::{TcpStream, UdpSocket};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -117,8 +116,7 @@ impl DownloadClient {
     pub async fn download_to_vec(&mut self) -> Result<Vec<u8>, ClientErr> {
         let mut download = Vec::with_capacity(2056);
         // TODO: This will need to be deduped with how it'll work in download_to_file
-        let oss_conn = OssuaryConnection::new(ConnectionType::Client, None)?;
-        let mut oss_stream = OssuaryStream::new(&mut self.stream, oss_conn);
+        let mut oss_stream = EncryptedStream::new(&mut self.stream);
         info!(LOG, "Client handshaking");
         oss_stream.handshake().await?;
         //        loop {
@@ -151,16 +149,8 @@ async fn progress_counter(progress: Arc<AtomicUsize>, total_size: u64) {
 #[derive(Debug, Fail)]
 pub enum ClientErr {
     // TODO: Clean / snafu / whatever
-    #[fail(display = "Osserr")]
-    OssuaryErr(OssuaryError),
     #[fail(display = "IOerr")]
     IOErr(std::io::Error),
-}
-
-impl From<OssuaryError> for ClientErr {
-    fn from(e: OssuaryError) -> Self {
-        ClientErr::OssuaryErr(e)
-    }
 }
 
 impl From<std::io::Error> for ClientErr {

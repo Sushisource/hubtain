@@ -17,7 +17,7 @@ mod filereader;
 mod filewriter;
 mod mnemonic;
 mod models;
-mod ossuary_stream;
+mod encrypted_stream;
 mod server;
 
 use crate::server::FileSrvBuilder;

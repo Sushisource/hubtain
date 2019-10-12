@@ -1,19 +1,19 @@
-use crate::ossuary_stream::OssuaryKey;
-use crate::{mnemonic::random_word, models::HandshakeReply, ossuary_stream::OssuaryStream, LOG};
+use crate::{mnemonic::random_word, models::HandshakeReply, encrypted_stream::EncryptedStream, LOG};
 use bincode::serialize;
 use failure::Error;
 use futures::io::{AsyncRead, AsyncReadExt};
-use ossuary::{ConnectionType, OssuaryConnection, OssuaryError};
-use runtime::task::JoinHandle;
 use runtime::{
+    task::JoinHandle,
     net::{TcpListener, UdpSocket},
-    spawn,
+    spawn
 };
+use rand::rngs::OsRng;
+use x25519_dalek::EphemeralSecret;
 
 /// File server for hubtain's srv mode
 pub struct FileSrv<T>
-where
-    T: 'static + AsyncRead + Send + Unpin + Clone,
+    where
+        T: 'static + AsyncRead + Send + Unpin + Clone,
 {
     stay_alive: bool,
     udp_sock: UdpSocket,
@@ -25,8 +25,8 @@ where
 }
 
 impl<T> FileSrv<T>
-where
-    T: 'static + AsyncRead + Send + Unpin + Clone,
+    where
+        T: 'static + AsyncRead + Send + Unpin + Clone,
 {
     /// Create a new `FileSrv` given UDP and TCP sockets to listen on and some data source to serve
     /// If `stay_alive` is false, the server will shut down after serving the data to the first
@@ -67,8 +67,9 @@ where
             match self.encrypted {
                 true => {
                     // TODO: stupid error conversion
-                    let kp = ossuary::generate_auth_keypair().unwrap();
-                    Some(kp)
+                    let mut rng = OsRng::new().unwrap();
+                    let secret = EphemeralSecret::new(&mut rng);
+                    Some(secret)
                 }
                 false => None,
             },
@@ -106,7 +107,7 @@ where
         mut tcp_sock: TcpListener,
         data: T,
         stay_alive: bool,
-        maybe_kp: Option<OssuaryKey>,
+        maybe_kp: Option<EphemeralSecret>,
     ) -> Result<(), DataSrvErr> {
         info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
         loop {
@@ -116,11 +117,7 @@ where
             let data_src = data.clone();
             // TODO: Don't use ossuary stream when not encrypted mode
             let h: JoinHandle<Result<(), DataSrvErr>> = spawn(async move {
-                let oss_conn = OssuaryConnection::new(
-                    ConnectionType::UnauthenticatedServer,
-                    maybe_kp.as_ref().map(|x| x.0.as_ref()),
-                )?;
-                let mut oss_stream = OssuaryStream::new(&mut stream, oss_conn);
+                let mut oss_stream = EncryptedStream::new(&mut stream);
                 info!(LOG, "Server handshaking");
                 oss_stream.handshake().await?;
                 info!(LOG, "Client downloading!");
@@ -140,16 +137,8 @@ where
 #[derive(Debug, Fail)]
 pub enum DataSrvErr {
     // TODO: Clean / snafu / whatever
-    #[fail(display = "Osserr")]
-    OssuaryErr(OssuaryError),
     #[fail(display = "IOerr")]
     IOErr(std::io::Error),
-}
-
-impl From<OssuaryError> for DataSrvErr {
-    fn from(e: OssuaryError) -> Self {
-        DataSrvErr::OssuaryErr(e)
-    }
 }
 
 impl From<std::io::Error> for DataSrvErr {
@@ -159,8 +148,8 @@ impl From<std::io::Error> for DataSrvErr {
 }
 
 pub struct FileSrvBuilder<T>
-where
-    T: 'static + AsyncRead + Send + Unpin + Clone,
+    where
+        T: 'static + AsyncRead + Send + Unpin + Clone,
 {
     data: T,
     data_len: u64,
@@ -180,19 +169,21 @@ const DEFAULT_TCP_LISTEN_ADDR: &str = "127.0.0.1";
 fn udp_srv_bind_addr(port_num: u16) -> String {
     format!("0.0.0.0:{}", port_num)
 }
+
 #[cfg(target_family = "unix")]
 #[cfg(not(test))]
 fn udp_srv_bind_addr(port_num: u16) -> String {
     format!("192.168.0.255:{}", port_num)
 }
+
 #[cfg(test)]
 fn udp_srv_bind_addr(port_num: u16) -> String {
     format!("127.0.0.1:{}", port_num)
 }
 
 impl<T> FileSrvBuilder<T>
-where
-    T: 'static + AsyncRead + Send + Unpin + Clone,
+    where
+        T: 'static + AsyncRead + Send + Unpin + Clone,
 {
     pub fn new(data: T, data_len: u64) -> FileSrvBuilder<T> {
         FileSrvBuilder {
