@@ -1,40 +1,72 @@
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use std::{io, io::Cursor, pin::Pin, task::Poll};
-use x25519_dalek::PublicKey;
+use ring::aead::{chacha20_poly1305_openssh::SealingKey, CHACHA20_POLY1305, UnboundKey};
 use serde::{Deserialize, Serialize};
+use std::{io, pin::Pin, task::Poll};
+use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
+use anyhow::Error;
 
-pub struct EncryptedStream<'a, S: AsyncWrite + AsyncRead> {
+pub struct EncryptedStreamStarter<'a, S: AsyncWrite + AsyncRead> {
     underlying: Pin<&'a mut S>,
-    handshake_complete: bool,
-    pubkey: PublicKey
+    secret: EphemeralSecret,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Handshake {
-    pkey: [u8; 32]
+    pkey: [u8; 32],
 }
 
-impl<'a, S> EncryptedStream<'a, S>
+impl<'a, S> EncryptedStreamStarter<'a, S>
 where
     S: AsyncWrite + AsyncRead + Unpin,
 {
-    pub fn new(underlying_stream: &'a mut S , pubkey: PublicKey) -> Self {
-        EncryptedStream {
+    pub fn new(underlying_stream: &'a mut S, secret: EphemeralSecret) -> Self {
+        EncryptedStreamStarter {
             underlying: Pin::new(underlying_stream),
-            handshake_complete: false,
-            pubkey
+            secret,
         }
     }
 
-    pub async fn handshake(&mut self) -> Result<(), anyhow::Error> {
-        // Exchange public keys
-        let send_hs = bincode::serialize(&Handshake {
-            pkey: *self.pubkey.as_bytes()
-        })?;
-        self.underlying.write_all(send_hs.as_slice());
+    /// Performs DH key exchange with the other side of the stream. Returns a new version
+    /// of the stream that can be read/write from, transparently encrypting/decrypting the
+    /// data.
+    pub async fn key_exchange(mut self) -> Result<EncryptedStream<'a, S>, Error> {
+        let pubkey = PublicKey::from(&self.secret);
+        let outgoing_hs = Handshake {
+            pkey: *pubkey.as_bytes(),
+        };
+        // Exchange public keys, first send ours
+        let send_hs = bincode::serialize(&outgoing_hs)?;
+        self.underlying.write_all(send_hs.as_slice()).await?;
 
-        self.handshake_complete = true;
-        Ok(())
+        // Read incoming pubkey
+        let read_size = bincode::serialized_size(&outgoing_hs)?;
+        let mut buff = vec![0; read_size as usize];
+        self.underlying.read_exact(&mut buff).await?;
+        let read_hs: Handshake = bincode::deserialize_from(buff.as_slice())?;
+
+        // Compute shared secret
+        let shared_secret = self.secret.diffie_hellman(&read_hs.pkey.into());
+
+        // TODO: Agree on nonce sequence here?
+
+        Ok(EncryptedStream {
+            underlying: self.underlying,
+            shared_secret,
+        })
+    }
+}
+
+pub struct EncryptedStream<'a, S: AsyncWrite + AsyncRead> {
+    underlying: Pin<&'a mut S>,
+    shared_secret: SharedSecret,
+}
+
+impl<'a, S> EncryptedStream<'a, S>
+    where
+        S: AsyncWrite + AsyncRead,
+{
+    fn new(underlying_stream: &'a mut S) -> Self {
+
     }
 }
 
@@ -47,12 +79,17 @@ where
         cx: &mut Context,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        if !self.handshake_complete {
-            return Poll::Ready(Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Handshake incomplete!",
-            )));
-        }
+        // TODO: Move this stuff to constructor
+        let unbound_k = UnboundKey::new(&CHACHA20_POLY1305, &self.shared_secret.as_bytes())?;
+        // Sealing key used to encrypt data
+        let sealing_key =
+            SealingKey::new(&CHACHA20_POLY1305, &self.shared_secret.as_bytes()).unwrap();
+
+        // TODO: have both sides agree on nonce sequence somehow
+        let mut nonce = vec![0; 12];
+
+        sealing_key.seal_in_place_append_tag();
+
         self.underlying.as_mut().poll_write(cx, buf)
     }
 
@@ -77,5 +114,3 @@ where
         self.underlying.as_mut().poll_read(cx, buf)
     }
 }
-
-

@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(dead_code))]
 
-use anyhow::{Error, anyhow};
+use anyhow::{anyhow, Error};
 use std::net::IpAddr;
 
 use get_if_addrs::get_if_addrs;

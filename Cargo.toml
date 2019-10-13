@@ -20,6 +20,7 @@ futures-select-macro-preview = "0.3.0-alpha.18"
 futures01 = { package = "futures", version = "0.1" }
 get_if_addrs = "0.5"
 rand = "0.6"
+ring = "0.16"
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.1"
 log = "0.4.0"

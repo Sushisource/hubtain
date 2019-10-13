@@ -1,19 +1,22 @@
-use crate::{mnemonic::random_word, models::HandshakeReply, encrypted_stream::EncryptedStream, LOG};
-use bincode::serialize;
-use anyhow::Error;
-use futures::io::{AsyncRead, AsyncReadExt};
-use runtime::{
-    task::JoinHandle,
-    net::{TcpListener, UdpSocket},
-    spawn
+use crate::encrypted_stream::EncryptedStreamStarter;
+use crate::{
+    encrypted_stream::EncryptedStream, mnemonic::random_word, models::HandshakeReply, LOG,
 };
+use anyhow::Error;
+use bincode::serialize;
+use futures::io::{AsyncRead, AsyncReadExt};
 use rand::rngs::OsRng;
-use x25519_dalek::{EphemeralSecret, PublicKey};
+use runtime::{
+    net::{TcpListener, UdpSocket},
+    spawn,
+    task::JoinHandle,
+};
+use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 
 /// File server for hubtain's srv mode
 pub struct FileSrv<T>
-    where
-        T: 'static + AsyncRead + Send + Unpin + Clone,
+where
+    T: 'static + AsyncRead + Send + Unpin + Clone,
 {
     stay_alive: bool,
     udp_sock: UdpSocket,
@@ -25,8 +28,8 @@ pub struct FileSrv<T>
 }
 
 impl<T> FileSrv<T>
-    where
-        T: 'static + AsyncRead + Send + Unpin + Clone,
+where
+    T: 'static + AsyncRead + Send + Unpin + Clone,
 {
     /// Create a new `FileSrv` given UDP and TCP sockets to listen on and some data source to serve
     /// If `stay_alive` is false, the server will shut down after serving the data to the first
@@ -65,13 +68,8 @@ impl<T> FileSrv<T>
             self.data.take().unwrap(),
             self.stay_alive,
             match self.encrypted {
-                true => {
-                    // TODO: stupid error conversion
-                    let mut rng = OsRng::new().unwrap();
-                    let secret = EphemeralSecret::new(&mut rng);
-                    Some(secret)
-                }
-                false => None,
+                true => EncryptionType::Ephemeral,
+                false => EncryptionType::None,
             },
         ));
 
@@ -107,23 +105,29 @@ impl<T> FileSrv<T>
         mut tcp_sock: TcpListener,
         data: T,
         stay_alive: bool,
-        maybe_kp: Option<EphemeralSecret>,
+        enctype: EncryptionType,
     ) -> Result<(), Error> {
         info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
-        // TODO: Generate if not passed in
-        let pubkey = PublicKey::from(&maybe_kp.unwrap());
         loop {
             let (mut stream, addr) = tcp_sock.accept().await?;
             info!(LOG, "Accepted download connection from {:?}", &addr);
             // TODO: Unneeded clone?
             let data_src = data.clone();
-            // TODO: Don't use ossuary stream when not encrypted mode
+            let enctype = enctype.clone();
+            // TODO: Don't use encrypytion when not encrypted mode
             let h: JoinHandle<Result<(), Error>> = spawn(async move {
-                let mut oss_stream = EncryptedStream::new(&mut stream, pubkey);
-                info!(LOG, "Server handshaking");
-                oss_stream.handshake().await?;
+                let mut write_stream = match enctype {
+                    EncryptionType::Ephemeral => {
+                        let mut rng = OsRng::new().unwrap();
+                        let secret = EphemeralSecret::new(&mut rng);
+                        let enc_stream = EncryptedStreamStarter::new(&mut stream, secret);
+                        info!(LOG, "Server handshaking");
+                        enc_stream.key_exchange().await?
+                    }
+                    _ => unimplemented!(),
+                };
                 info!(LOG, "Client downloading!");
-                data_src.copy_into(&mut oss_stream).await?;
+                data_src.copy_into(&mut write_stream).await?;
                 Ok(())
             });
             if !stay_alive {
@@ -136,9 +140,16 @@ impl<T> FileSrv<T>
     }
 }
 
+#[derive(Clone)]
+enum EncryptionType {
+    None,
+    Static(StaticSecret),
+    Ephemeral,
+}
+
 pub struct FileSrvBuilder<T>
-    where
-        T: 'static + AsyncRead + Send + Unpin + Clone,
+where
+    T: 'static + AsyncRead + Send + Unpin + Clone,
 {
     data: T,
     data_len: u64,
@@ -171,8 +182,8 @@ fn udp_srv_bind_addr(port_num: u16) -> String {
 }
 
 impl<T> FileSrvBuilder<T>
-    where
-        T: 'static + AsyncRead + Send + Unpin + Clone,
+where
+    T: 'static + AsyncRead + Send + Unpin + Clone,
 {
     pub fn new(data: T, data_len: u64) -> FileSrvBuilder<T> {
         FileSrvBuilder {

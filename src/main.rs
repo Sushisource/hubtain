@@ -11,20 +11,20 @@ extern crate derive_new;
 
 mod broadcast_addr_picker;
 mod client;
+mod encrypted_stream;
 mod filereader;
 mod filewriter;
 mod mnemonic;
 mod models;
-mod encrypted_stream;
 mod server;
 
 use crate::server::FileSrvBuilder;
 use crate::{client::DownloadClient, filereader::AsyncFileReader};
+use anyhow::{anyhow, Error};
 #[cfg(not(test))]
 use broadcast_addr_picker::select_broadcast_addr;
 use clap::AppSettings;
 use colored::Colorize;
-use anyhow::{Error, anyhow};
 use slog::Drain;
 #[cfg(test)]
 use std::net::Ipv4Addr;

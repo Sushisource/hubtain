@@ -1,28 +1,21 @@
-use crate::encrypted_stream::EncryptedStream;
+use crate::encrypted_stream::{EncryptedStreamStarter};
 use crate::{filewriter::AsyncFileWriter, models::HandshakeReply, BROADCAST_ADDR, LOG};
+use anyhow::{anyhow, Error};
 use bincode::deserialize;
-use anyhow::{Error, anyhow};
 use futures::{
     compat::Future01CompatExt, io::AsyncReadExt, select, FutureExt as OFutureExt, TryFutureExt,
 };
 use indicatif::ProgressBar;
+use rand::rngs::OsRng;
 use runtime::net::{TcpStream, UdpSocket};
 use std::{
-    sync::{
-        atomic::Ordering,
-        Arc,
-        atomic::AtomicUsize
-    },
     net::SocketAddr,
     path::PathBuf,
-    time::{
-        Duration,
-        Instant
-    }
+    sync::{atomic::AtomicUsize, atomic::Ordering, Arc},
+    time::{Duration, Instant},
 };
 use tokio::{prelude::FutureExt, timer::Delay};
-use x25519_dalek::{EphemeralSecret, PublicKey};
-use rand::rngs::OsRng;
+use x25519_dalek::{EphemeralSecret,};
 
 /// Client for hubtain's fetch mode
 pub struct DownloadClient {
@@ -128,9 +121,9 @@ impl DownloadClient {
         // TODO: This will need to be deduped with how it'll work in download_to_file
         let mut rng = OsRng::new().unwrap();
         let secret = EphemeralSecret::new(&mut rng);
-        let mut enc_stream = EncryptedStream::new(&mut self.stream, PublicKey::from(&secret));
+        let enc_stream = EncryptedStreamStarter::new(&mut self.stream, secret);
         info!(LOG, "Client handshaking");
-        enc_stream.handshake().await?;
+        let mut enc_stream = enc_stream.key_exchange().await?;
         //        loop {
         let bytes_read = enc_stream.read_to_end(&mut download).await?;
         dbg!(bytes_read);
