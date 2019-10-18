@@ -242,11 +242,14 @@ mod test {
 
         let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
         let file_siz = test_file.file_size;
-        let fsrv = FileSrvBuilder::new(test_file, file_siz).build().unwrap();
+        let fsrv = FileSrvBuilder::new(test_file, file_siz)
+            .set_encryption(true)
+            .build()
+            .unwrap();
         let udp_port = fsrv.udp_port().unwrap();
         let _ = spawn(fsrv.serve());
 
-        let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
+        let client = DownloadClient::connect(udp_port, test_srvr_sel)
             .await
             .unwrap();
         let start = Instant::now();

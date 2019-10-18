@@ -99,7 +99,10 @@ impl DownloadClient {
         let mut progress_fut = progress_counter(bytes_written_ref, self.server_info.data_len)
             .boxed()
             .fuse();
-        let mut download_fut = self.drain_downloaded_to_stream(&mut as_fwriter).boxed().fuse();
+        let mut download_fut = self
+            .drain_downloaded_to_stream(&mut as_fwriter)
+            .boxed()
+            .fuse();
 
         select! {
             _ = progress_fut => (),
@@ -123,10 +126,10 @@ impl DownloadClient {
         Ok(download)
     }
 
-    async fn drain_downloaded_to_stream<T>(
-        mut self,
-        mut download: &mut T,
-    ) -> Result<u64, Error> where T: AsyncWrite + Unpin {
+    async fn drain_downloaded_to_stream<T>(mut self, mut download: &mut T) -> Result<u64, Error>
+    where
+        T: AsyncWrite + Unpin,
+    {
         if self.server_info.encrypted {
             let mut rng = OsRng::new().unwrap();
             let secret = EphemeralSecret::new(&mut rng);
@@ -137,7 +140,8 @@ impl DownloadClient {
             enc_stream.copy_into(&mut download).await
         } else {
             self.stream.copy_into(download).await
-        }.map_err(Into::into)
+        }
+        .map_err(Into::into)
     }
 }
 
