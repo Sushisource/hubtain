@@ -18,8 +18,8 @@ where
 {
     stay_alive: bool,
     udp_sock: UdpSocket,
-    tcp_sock: Option<TcpListener>,
-    data: Option<T>,
+    tcp_sock: TcpListener,
+    data: T,
     data_length: u64,
     name: String,
     encrypted: bool,
@@ -44,8 +44,8 @@ where
         FileSrv {
             stay_alive,
             udp_sock,
-            tcp_sock: Some(tcp_sock),
-            data: Some(data),
+            tcp_sock,
+            data,
             data_length,
             name: name.to_string(),
             encrypted,
@@ -55,15 +55,14 @@ where
     /// Begin listening for connections and serving data.
     pub async fn serve(mut self) -> Result<(), Error> {
         info!(LOG, "Server name: {}", self.name);
-        // TODO: no unwrap
-        let tcp_port = self.tcp_sock.as_ref().unwrap().local_addr()?.port();
+        let tcp_port = self.tcp_sock.local_addr()?.port();
 
         self.udp_sock.set_broadcast(true)?;
         info!(LOG, "UDP Listening on {}", self.udp_sock.local_addr()?);
 
         let data_handle = spawn(FileSrv::data_srv(
-            self.tcp_sock.take().unwrap(),
-            self.data.take().unwrap(),
+            self.tcp_sock,
+            self.data,
             self.stay_alive,
             match self.encrypted {
                 true => EncryptionType::Ephemeral,
@@ -113,7 +112,6 @@ where
             // TODO: Unneeded clone?
             let data_src = data.clone();
             let enctype = enctype.clone();
-            // TODO: Don't use encrypytion when not encrypted mode
             let h: JoinHandle<Result<(), Error>> = spawn(async move {
                 match enctype {
                     EncryptionType::Ephemeral => {
