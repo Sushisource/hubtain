@@ -1,18 +1,14 @@
-use crate::encrypted_stream::{EncryptedStream, EncryptedStreamStarter};
+use crate::encrypted_stream::EncryptedStreamStarter;
 use crate::{mnemonic::random_word, models::HandshakeReply, LOG};
 use anyhow::Error;
 use bincode::serialize;
 use futures::io::{AsyncRead, AsyncReadExt};
-use futures::task::Context;
-use futures::{AsyncWrite, Poll};
 use rand::rngs::OsRng;
-use runtime::net::TcpStream;
 use runtime::{
     net::{TcpListener, UdpSocket},
     spawn,
     task::JoinHandle,
 };
-use std::pin::Pin;
 use x25519_dalek::{EphemeralSecret, StaticSecret};
 
 /// File server for hubtain's srv mode
@@ -97,6 +93,7 @@ where
     }
 
     /// Return the UDP port the server is bound to
+    #[cfg(test)]
     pub fn udp_port(&self) -> Result<u16, Error> {
         Ok(self.udp_sock.local_addr()?.port())
     }
@@ -140,7 +137,6 @@ where
             if !stay_alive {
                 // TODO: Does this screw up multi client mode?
                 h.await?;
-                info!(LOG, "I'M MELLLLLLTIIIIING");
                 return Ok(());
             }
         }

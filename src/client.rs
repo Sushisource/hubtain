@@ -3,7 +3,8 @@ use crate::{filewriter::AsyncFileWriter, models::HandshakeReply, BROADCAST_ADDR,
 use anyhow::{anyhow, Error};
 use bincode::deserialize;
 use futures::{
-    compat::Future01CompatExt, io::AsyncReadExt, select, FutureExt as OFutureExt, TryFutureExt,
+    compat::Future01CompatExt, io::AsyncReadExt, select, AsyncWrite, FutureExt as OFutureExt,
+    TryFutureExt,
 };
 use indicatif::ProgressBar;
 use rand::rngs::OsRng;
@@ -84,10 +85,10 @@ impl DownloadClient {
             path
         };
 
-        if path.exists() {
-            // TODO: Allow override
-            return Err(anyhow!("Refusing to overwrite existing file!"));
-        }
+        //        if path.exists() {
+        //            // TODO: Allow override
+        //            return Err(anyhow!("Refusing to overwrite existing file!"));
+        //        }
 
         let path = path.as_path();
         info!(LOG, "Downloading to {:?}", path.as_os_str());
@@ -98,12 +99,13 @@ impl DownloadClient {
         let mut progress_fut = progress_counter(bytes_written_ref, self.server_info.data_len)
             .boxed()
             .fuse();
-        let mut download_fut = self.stream.copy_into(&mut as_fwriter).fuse();
+        let mut download_fut = self.drain_downloaded_to_stream(&mut as_fwriter).boxed().fuse();
 
         select! {
             _ = progress_fut => (),
             _ = download_fut => ()
         };
+        drop(download_fut);
 
         info!(
             LOG,
@@ -115,23 +117,27 @@ impl DownloadClient {
     }
 
     /// downloads server data to a vec
-    pub async fn download_to_vec(&mut self) -> Result<Vec<u8>, Error> {
+    pub async fn download_to_vec(self) -> Result<Vec<u8>, Error> {
         let mut download = Vec::with_capacity(2056);
-        // TODO: This will need to be deduped with how it'll work in download_to_file
+        self.drain_downloaded_to_stream(&mut download).await?;
+        Ok(download)
+    }
+
+    async fn drain_downloaded_to_stream<T>(
+        mut self,
+        mut download: &mut T,
+    ) -> Result<u64, Error> where T: AsyncWrite + Unpin {
         if self.server_info.encrypted {
             let mut rng = OsRng::new().unwrap();
             let secret = EphemeralSecret::new(&mut rng);
             let enc_stream = EncryptedStreamStarter::new(&mut self.stream, secret);
-            info!(LOG, "Client handshaking");
-            let mut enc_stream = enc_stream.key_exchange().await?;
+            info!(LOG, "Client encrypytion handshaking");
+            let enc_stream = enc_stream.key_exchange().await?;
 
-            let bytes_read = enc_stream.read_to_end(&mut download).await?;
-            dbg!(bytes_read);
+            enc_stream.copy_into(&mut download).await
         } else {
-            self.stream.read_to_end(&mut download).await?;
-        }
-
-        Ok(download)
+            self.stream.copy_into(download).await
+        }.map_err(Into::into)
     }
 }
 

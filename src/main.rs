@@ -126,6 +126,7 @@ mod test {
     use crate::{client::test_srvr_sel, filereader::AsyncFileReader, server::FileSrvBuilder};
     use runtime::spawn;
     use std::{fs::File, io::Read};
+    use tempfile::NamedTempFile;
 
     static TEST_DATA: &[u8] = b"Hi I'm data";
 
@@ -137,7 +138,7 @@ mod test {
         let udp_port = fsrv.udp_port().unwrap();
         let server_f = spawn(fsrv.serve());
 
-        let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
+        let client = DownloadClient::connect(udp_port, test_srvr_sel)
             .await
             .unwrap();
         let content = client.download_to_vec().await.unwrap();
@@ -154,7 +155,7 @@ mod test {
         let udp_port = fsrv.udp_port().unwrap();
         let server_f = spawn(fsrv.serve());
 
-        let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
+        let client = DownloadClient::connect(udp_port, test_srvr_sel)
             .await
             .unwrap();
         let content = client.download_to_vec().await.unwrap();
@@ -165,37 +166,47 @@ mod test {
 
     #[runtime::test(runtime_tokio::Tokio)]
     async fn single_small_file_transfer() {
+        file_transfer_test(false).await;
+    }
+
+    #[runtime::test(runtime_tokio::Tokio)]
+    async fn single_small_encrypted_file_transfer() {
+        file_transfer_test(true).await;
+    }
+
+    async fn file_transfer_test(encryption: bool) {
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
         let file_siz = test_file.file_size;
-        let fsrv = FileSrvBuilder::new(test_file, file_siz).build().unwrap();
+        let fsrv = FileSrvBuilder::new(test_file, file_siz)
+            .set_encryption(encryption)
+            .build()
+            .unwrap();
         let udp_port = fsrv.udp_port().unwrap();
         let server_f = spawn(fsrv.serve());
-
         let client = DownloadClient::connect(udp_port, test_srvr_sel)
             .await
             .unwrap();
+        let download_to = NamedTempFile::new().unwrap();
         client
-            .download_to_file("testdata/tmp.small.txt".into())
+            .download_to_file(download_to.path().to_path_buf())
             .await
             .unwrap();
-
         let mut expected_dat = vec![];
         File::open("testdata/small.txt")
             .unwrap()
             .read_to_end(&mut expected_dat)
             .unwrap();
         let mut test_dat = vec![];
-        File::open("testdata/tmp.small.txt")
+        File::open(download_to.path())
             .unwrap()
             .read_to_end(&mut test_dat)
             .unwrap();
         assert_eq!(expected_dat, test_dat);
-        std::fs::remove_file("testdata/tmp.small.txt").unwrap();
         server_f.await.unwrap();
     }
 
     #[runtime::test(runtime_tokio::Tokio)]
-    async fn multiple_small_file_transfer() {
+    async fn multiple_small_transfer() {
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
         let file_siz = test_file.file_size;
         let fsrv = FileSrvBuilder::new(test_file, file_siz)
@@ -206,7 +217,7 @@ mod test {
         let _ = spawn(fsrv.serve());
 
         let dl_futures = (1..100).map(async move |_| {
-            let mut client = DownloadClient::connect(udp_port, test_srvr_sel)
+            let client = DownloadClient::connect(udp_port, test_srvr_sel)
                 .await
                 .unwrap();
             client.download_to_vec().await
