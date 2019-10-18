@@ -1,16 +1,18 @@
-use crate::encrypted_stream::EncryptedStreamStarter;
-use crate::{
-    mnemonic::random_word, models::HandshakeReply, LOG,
-};
+use crate::encrypted_stream::{EncryptedStream, EncryptedStreamStarter};
+use crate::{mnemonic::random_word, models::HandshakeReply, LOG};
 use anyhow::Error;
 use bincode::serialize;
 use futures::io::{AsyncRead, AsyncReadExt};
+use futures::task::Context;
+use futures::{AsyncWrite, Poll};
 use rand::rngs::OsRng;
+use runtime::net::TcpStream;
 use runtime::{
     net::{TcpListener, UdpSocket},
     spawn,
     task::JoinHandle,
 };
+use std::pin::Pin;
 use x25519_dalek::{EphemeralSecret, StaticSecret};
 
 /// File server for hubtain's srv mode
@@ -116,18 +118,23 @@ where
             let enctype = enctype.clone();
             // TODO: Don't use encrypytion when not encrypted mode
             let h: JoinHandle<Result<(), Error>> = spawn(async move {
-                let mut write_stream = match enctype {
+                match enctype {
                     EncryptionType::Ephemeral => {
                         let mut rng = OsRng::new().unwrap();
                         let secret = EphemeralSecret::new(&mut rng);
                         let enc_stream = EncryptedStreamStarter::new(&mut stream, secret);
                         info!(LOG, "Server handshaking");
-                        enc_stream.key_exchange().await?
+                        info!(LOG, "Client downloading!");
+                        data_src
+                            .copy_into(&mut enc_stream.key_exchange().await?)
+                            .await?;
+                    }
+                    EncryptionType::None => {
+                        info!(LOG, "Client downloading!");
+                        data_src.copy_into(&mut stream).await?;
                     }
                     _ => unimplemented!(),
                 };
-                info!(LOG, "Client downloading!");
-                data_src.copy_into(&mut write_stream).await?;
                 Ok(())
             });
             if !stay_alive {

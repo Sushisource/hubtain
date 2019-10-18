@@ -1,10 +1,10 @@
-use anyhow::{Error, anyhow};
+use anyhow::{anyhow, Error};
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use ring::aead::{UnboundKey, CHACHA20_POLY1305, LessSafeKey, Aad, Nonce};
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use serde::{Deserialize, Serialize};
+use std::io::{Cursor, Write};
 use std::{io, pin::Pin, task::Poll};
 use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
-use std::io::{Cursor, Write};
 
 macro_rules! dbghex {
     ($e:expr) => {
@@ -75,10 +75,7 @@ where
         // key used to encrypt data
         let key = LessSafeKey::new(unbound_k);
 
-        Ok(Self {
-            underlying,
-            key,
-        })
+        Ok(Self { underlying, key })
     }
 }
 
@@ -95,10 +92,14 @@ where
         let nonce = Nonce::assume_unique_for_key([0; 12]);
 
         let mut encrypt_me = buf.to_vec();
-        self.key.seal_in_place_append_tag(nonce, Aad::empty(), &mut encrypt_me).unwrap();
+        self.key
+            .seal_in_place_append_tag(nonce, Aad::empty(), &mut encrypt_me)
+            .unwrap();
 
         dbghex!(&encrypt_me);
-        self.underlying.as_mut().poll_write(cx, encrypt_me.as_slice())
+        self.underlying
+            .as_mut()
+            .poll_write(cx, encrypt_me.as_slice())
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
@@ -127,15 +128,18 @@ where
         match &read {
             Poll::Ready(Ok(bytes_read)) => {
                 if *bytes_read == 0 {
-                    return read
+                    return read;
                 }
                 let (mut just_content, _) = decrypt_buff.split_at_mut(*bytes_read);
-                let just_content = self.key.open_in_place(nonce, Aad::empty(), &mut just_content).unwrap();
+                let just_content = self
+                    .key
+                    .open_in_place(nonce, Aad::empty(), &mut just_content)
+                    .unwrap();
                 let mut cursor = Cursor::new(buf);
                 Write::write_all(&mut cursor, &just_content).expect("Internal write");
-                return Poll::Ready(Ok(just_content.len()))
+                return Poll::Ready(Ok(just_content.len()));
             }
-            _ => ()
+            _ => (),
         };
         read
     }

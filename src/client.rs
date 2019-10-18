@@ -1,3 +1,4 @@
+use crate::encrypted_stream::EncryptedStreamStarter;
 use crate::{filewriter::AsyncFileWriter, models::HandshakeReply, BROADCAST_ADDR, LOG};
 use anyhow::{anyhow, Error};
 use bincode::deserialize;
@@ -5,6 +6,7 @@ use futures::{
     compat::Future01CompatExt, io::AsyncReadExt, select, FutureExt as OFutureExt, TryFutureExt,
 };
 use indicatif::ProgressBar;
+use rand::rngs::OsRng;
 use runtime::net::{TcpStream, UdpSocket};
 use std::{
     net::SocketAddr,
@@ -13,9 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{prelude::FutureExt, timer::Delay};
-use rand::rngs::OsRng;
 use x25519_dalek::EphemeralSecret;
-use crate::encrypted_stream::EncryptedStreamStarter;
 
 /// Client for hubtain's fetch mode
 pub struct DownloadClient {
@@ -118,22 +118,19 @@ impl DownloadClient {
     pub async fn download_to_vec(&mut self) -> Result<Vec<u8>, Error> {
         let mut download = Vec::with_capacity(2056);
         // TODO: This will need to be deduped with how it'll work in download_to_file
-        let mut rng = OsRng::new().unwrap();
-        let secret = EphemeralSecret::new(&mut rng);
-        let enc_stream = EncryptedStreamStarter::new(&mut self.stream, secret);
-        info!(LOG, "Client handshaking");
-        let mut enc_stream = enc_stream.key_exchange().await?;
-        //        loop {
-        let bytes_read = enc_stream.read_to_end(&mut download).await?;
-        dbg!(bytes_read);
-        //            if bytes_read > 0 {
-        //                break
-        //            }
-        //            // TODO: Don't do this crap. Do check bytes read==expected.
-        //            let _ = Delay::new(Instant::now() + Duration::from_millis(100))
-        //                .compat()
-        //                .await;
-        //        }
+        if self.server_info.encrypted {
+            let mut rng = OsRng::new().unwrap();
+            let secret = EphemeralSecret::new(&mut rng);
+            let enc_stream = EncryptedStreamStarter::new(&mut self.stream, secret);
+            info!(LOG, "Client handshaking");
+            let mut enc_stream = enc_stream.key_exchange().await?;
+
+            let bytes_read = enc_stream.read_to_end(&mut download).await?;
+            dbg!(bytes_read);
+        } else {
+            self.stream.read_to_end(&mut download).await?;
+        }
+
         Ok(download)
     }
 }
