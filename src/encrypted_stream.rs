@@ -6,12 +6,6 @@ use std::io::{Cursor, Write};
 use std::{io, pin::Pin, task::Poll};
 use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
 
-macro_rules! dbghex {
-    ($e:expr) => {
-        dbg!(hex::encode($e))
-    };
-}
-
 pub struct EncryptedStreamStarter<'a, S: AsyncWrite + AsyncRead> {
     underlying: Pin<&'a mut S>,
     secret: EphemeralSecret,
@@ -96,7 +90,6 @@ where
             .seal_in_place_append_tag(nonce, Aad::empty(), &mut encrypt_me)
             .unwrap();
 
-        dbghex!(&encrypt_me);
         self.underlying
             .as_mut()
             .poll_write(cx, encrypt_me.as_slice())

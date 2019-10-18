@@ -62,8 +62,8 @@ async fn main() -> Result<(), Error> {
         (@subcommand srv =>
             (about: "Server mode")
             (@arg FILE: +required "The file to serve")
-            (@arg stayalive: --no-encryption "Disable encryption")
-            (@arg encryption: -s --stayalive "Server stays alive indefinitely rather than stopping \
+            (@arg no_encryption: -n --("no-encryption") "Disable encryption")
+            (@arg stayalive: -s --stayalive "Server stays alive indefinitely rather than stopping \
                                              after serving one file")
         )
         (@subcommand fetch =>
@@ -99,7 +99,7 @@ async fn main() -> Result<(), Error> {
             let fsrv = FileSrvBuilder::new(serv_file, file_siz)
                 .set_udp_port(42444)
                 .set_stayalive(sc.is_present("stayalive"))
-                .set_encryption(sc.is_present("encryption"))
+                .set_encryption(!sc.is_present("no_encryption"))
                 .build()?;
             fsrv.serve().await?;
         }
