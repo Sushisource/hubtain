@@ -1,9 +1,16 @@
+use anyhow::{Error, anyhow};
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use ring::aead::{chacha20_poly1305_openssh::SealingKey, CHACHA20_POLY1305, UnboundKey};
+use ring::aead::{UnboundKey, CHACHA20_POLY1305, LessSafeKey, Aad, Nonce};
 use serde::{Deserialize, Serialize};
 use std::{io, pin::Pin, task::Poll};
 use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
-use anyhow::Error;
+use std::io::{Cursor, Write};
+
+macro_rules! dbghex {
+    ($e:expr) => {
+        dbg!(hex::encode($e))
+    };
+}
 
 pub struct EncryptedStreamStarter<'a, S: AsyncWrite + AsyncRead> {
     underlying: Pin<&'a mut S>,
@@ -49,24 +56,29 @@ where
 
         // TODO: Agree on nonce sequence here?
 
-        Ok(EncryptedStream {
-            underlying: self.underlying,
-            shared_secret,
-        })
+        EncryptedStream::new(self.underlying, shared_secret)
     }
 }
 
 pub struct EncryptedStream<'a, S: AsyncWrite + AsyncRead> {
     underlying: Pin<&'a mut S>,
-    shared_secret: SharedSecret,
+    key: LessSafeKey,
 }
 
 impl<'a, S> EncryptedStream<'a, S>
-    where
-        S: AsyncWrite + AsyncRead,
+where
+    S: AsyncWrite + AsyncRead,
 {
-    fn new(underlying_stream: &'a mut S) -> Self {
+    fn new(underlying: Pin<&'a mut S>, shared_secret: SharedSecret) -> Result<Self, Error> {
+        let unbound_k = UnboundKey::new(&CHACHA20_POLY1305, shared_secret.as_bytes())
+            .map_err(|_| anyhow!("Couldn't bind key"))?;
+        // key used to encrypt data
+        let key = LessSafeKey::new(unbound_k);
 
+        Ok(Self {
+            underlying,
+            key,
+        })
     }
 }
 
@@ -79,18 +91,14 @@ where
         cx: &mut Context,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        // TODO: Move this stuff to constructor
-        let unbound_k = UnboundKey::new(&CHACHA20_POLY1305, &self.shared_secret.as_bytes())?;
-        // Sealing key used to encrypt data
-        let sealing_key =
-            SealingKey::new(&CHACHA20_POLY1305, &self.shared_secret.as_bytes()).unwrap();
+        // TODO: have both sides agree on nonce sequence somehow?
+        let nonce = Nonce::assume_unique_for_key([0; 12]);
 
-        // TODO: have both sides agree on nonce sequence somehow
-        let mut nonce = vec![0; 12];
+        let mut encrypt_me = buf.to_vec();
+        self.key.seal_in_place_append_tag(nonce, Aad::empty(), &mut encrypt_me).unwrap();
 
-        sealing_key.seal_in_place_append_tag();
-
-        self.underlying.as_mut().poll_write(cx, buf)
+        dbghex!(&encrypt_me);
+        self.underlying.as_mut().poll_write(cx, encrypt_me.as_slice())
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
@@ -111,6 +119,24 @@ where
         cx: &mut Context,
         buf: &mut [u8],
     ) -> Poll<Result<usize, io::Error>> {
-        self.underlying.as_mut().poll_read(cx, buf)
+        // TODO: have both sides agree on nonce sequence somehow?
+        let nonce = Nonce::assume_unique_for_key([0; 12]);
+
+        let mut decrypt_buff = vec![0; 2048];
+        let read = self.underlying.as_mut().poll_read(cx, &mut decrypt_buff);
+        match &read {
+            Poll::Ready(Ok(bytes_read)) => {
+                if *bytes_read == 0 {
+                    return read
+                }
+                let (mut just_content, _) = decrypt_buff.split_at_mut(*bytes_read);
+                let just_content = self.key.open_in_place(nonce, Aad::empty(), &mut just_content).unwrap();
+                let mut cursor = Cursor::new(buf);
+                Write::write_all(&mut cursor, &just_content).expect("Internal write");
+                return Poll::Ready(Ok(just_content.len()))
+            }
+            _ => ()
+        };
+        read
     }
 }

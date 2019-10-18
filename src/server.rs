@@ -1,6 +1,6 @@
 use crate::encrypted_stream::EncryptedStreamStarter;
 use crate::{
-    encrypted_stream::EncryptedStream, mnemonic::random_word, models::HandshakeReply, LOG,
+    mnemonic::random_word, models::HandshakeReply, LOG,
 };
 use anyhow::Error;
 use bincode::serialize;
@@ -11,7 +11,7 @@ use runtime::{
     spawn,
     task::JoinHandle,
 };
-use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
+use x25519_dalek::{EphemeralSecret, StaticSecret};
 
 /// File server for hubtain's srv mode
 pub struct FileSrv<T>
