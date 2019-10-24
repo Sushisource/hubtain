@@ -2,6 +2,7 @@ use anyhow::{anyhow, Error};
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use serde::{Deserialize, Serialize};
+use std::cmp::min;
 use std::io::{Cursor, Write};
 use std::{io, pin::Pin, task::Poll};
 use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
@@ -73,6 +74,12 @@ where
     }
 }
 
+const CHUNK_SIZE: usize = 5012;
+#[derive(Serialize, Deserialize)]
+struct EncryptedPacket {
+    data: Vec<u8>,
+}
+
 impl<'a, S> AsyncWrite for EncryptedStream<'a, S>
 where
     S: AsyncWrite + AsyncRead,
@@ -85,14 +92,28 @@ where
         // TODO: have both sides agree on nonce sequence somehow?
         let nonce = Nonce::assume_unique_for_key([0; 12]);
 
-        let mut encrypt_me = buf.to_vec();
+        let siz = min(buf.len(), CHUNK_SIZE);
+        let mut encrypt_me = vec![0; siz];
+        encrypt_me.copy_from_slice(&buf[0..siz]);
+        let bufsiz = encrypt_me.len();
+        dbg!(&bufsiz);
         self.key
             .seal_in_place_append_tag(nonce, Aad::empty(), &mut encrypt_me)
             .unwrap();
 
+        dbg!(encrypt_me.len());
+        let packet = EncryptedPacket { data: encrypt_me };
+        let bincoded = bincode::serialize(&packet).unwrap();
         self.underlying
             .as_mut()
-            .poll_write(cx, encrypt_me.as_slice())
+            .poll_write(cx, bincoded.as_slice())
+            .map(|r| match r {
+                Ok(really_wrote) => {
+                    dbg!(really_wrote);
+                    Ok(bufsiz)
+                }
+                o => o,
+            })
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
@@ -116,21 +137,28 @@ where
         // TODO: have both sides agree on nonce sequence somehow?
         let nonce = Nonce::assume_unique_for_key([0; 12]);
 
-        let mut decrypt_buff = vec![0; 2048];
+        // TODO: How to ensure sufficient padding here...?
+        let mut decrypt_buff = vec![0; CHUNK_SIZE + 1024];
         let read = self.underlying.as_mut().poll_read(cx, &mut decrypt_buff);
+
         match &read {
             Poll::Ready(Ok(bytes_read)) => {
                 if *bytes_read == 0 {
                     return read;
                 }
-                let (mut just_content, _) = decrypt_buff.split_at_mut(*bytes_read);
+                dbg!(&bytes_read);
+                let packet: EncryptedPacket =
+                    bincode::deserialize(decrypt_buff.as_slice()).unwrap();
+                let mut decrypt_buff = packet.data;
+                dbg!(&decrypt_buff.len());
+
                 let just_content = self
                     .key
-                    .open_in_place(nonce, Aad::empty(), &mut just_content)
+                    .open_in_place(nonce, Aad::empty(), &mut decrypt_buff)
                     .unwrap();
                 let mut cursor = Cursor::new(buf);
                 Write::write_all(&mut cursor, &just_content).expect("Internal write");
-                return Poll::Ready(Ok(just_content.len()));
+                return Poll::Ready(Ok(*bytes_read));
             }
             _ => (),
         };

@@ -9,6 +9,7 @@ use futures::{
 use indicatif::ProgressBar;
 use rand::rngs::OsRng;
 use runtime::net::{TcpStream, UdpSocket};
+use std::fs::OpenOptions;
 use std::{
     net::SocketAddr,
     path::PathBuf,
@@ -92,13 +93,11 @@ impl DownloadClient {
 
         let path = path.as_path();
         info!(LOG, "Downloading to {:?}", path.as_os_str());
+        let data_len = self.server_info.data_len;
 
         let mut as_fwriter = AsyncFileWriter::new(path)?;
-
         let bytes_written_ref = as_fwriter.bytes_writen.clone();
-        let mut progress_fut = progress_counter(bytes_written_ref, self.server_info.data_len)
-            .boxed()
-            .fuse();
+        let mut progress_fut = progress_counter(bytes_written_ref, data_len).boxed().fuse();
         let mut download_fut = self
             .drain_downloaded_to_stream(&mut as_fwriter)
             .boxed()
@@ -115,6 +114,12 @@ impl DownloadClient {
             "Downloaded {} bytes",
             as_fwriter.bytes_writen.load(Ordering::Relaxed),
         );
+        drop(as_fwriter);
+        // Truncate any extra padding that may have been read
+        OpenOptions::new()
+            .write(true)
+            .open(path)?
+            .set_len(data_len)?;
         info!(LOG, "...done!");
         Ok(())
     }
@@ -122,7 +127,11 @@ impl DownloadClient {
     /// downloads server data to a vec
     pub async fn download_to_vec(self) -> Result<Vec<u8>, Error> {
         let mut download = Vec::with_capacity(2056);
+        let data_len = self.server_info.data_len as usize;
+        dbg!(&data_len);
         self.drain_downloaded_to_stream(&mut download).await?;
+        // Truncate any extra padding that may have been read
+        download.split_off(data_len);
         Ok(download)
     }
 
