@@ -59,6 +59,7 @@ pub struct EncryptedStream<'a, S: AsyncWrite + AsyncRead> {
     underlying: Pin<&'a mut S>,
     key: LessSafeKey,
     read_remainder: Vec<u8>,
+    unwritten: Vec<Vec<u8>>
 }
 
 impl<'a, S> EncryptedStream<'a, S>
@@ -75,6 +76,7 @@ where
             underlying,
             key,
             read_remainder: vec![],
+            unwritten: vec![]
         })
     }
 }
@@ -139,102 +141,119 @@ where
         cx: &mut Context,
         buf: &mut [u8],
     ) -> Poll<Result<usize, io::Error>> {
+
+        let mut written_from_unwritten = 0;
+        while let Some(unwritten) = self.unwritten.pop() {
+            dbg!("Writing reserved packet");
+            Write::write_all(&mut buf.as_mut(), &unwritten).expect("Must work");
+            written_from_unwritten += unwritten.len();
+        }
+
         // TODO: have both sides agree on nonce sequence somehow?
         let nonce = Nonce::assume_unique_for_key([0; 12]);
 
         // TODO: How to ensure sufficient padding here...?
-        let mut read_buf = vec![0; CHUNK_SIZE * 2];
+        let mut read_buf = vec![0; buf.len()];
         let read = self.underlying.as_mut().poll_read(cx, &mut read_buf);
 
         match &read {
             Poll::Ready(Ok(bytes_read)) => {
                 if *bytes_read == 0 {
+                    dbg!("WAAAAAAAAAAAAAAAHHH");
                     if self.read_remainder.is_empty() {
-                        return read;
+                        return Poll::Ready(Ok(written_from_unwritten));
                     }
-                    let mut cursord = Cursor::new(self.read_remainder.as_slice());
-                    // TODO: so much dupe if this is the real fix
-                    let packet: EncryptedPacket = match bincode::deserialize_from(&mut cursord) {
-                        Ok(p) => p,
-                        Err(e) => return Poll::Pending,
-                    };
-                    let cpos = cursord.position();
-                    self.read_remainder = self.read_remainder.split_off(cpos as usize);
-                    let mut decrypt_buff = packet.data;
-                    dbg!(&decrypt_buff.len());
-
-                    if decrypt_buff.is_empty() {
-                        return Poll::Ready(Ok(0));
-                    }
-
-                    let just_content = self
-                        .key
-                        .open_in_place(nonce, Aad::empty(), &mut decrypt_buff)
-                        .unwrap();
-                    let mut cursor = Cursor::new(buf);
-                    Write::write_all(&mut cursor, &just_content).expect("Internal write");
-                    dbg!(just_content.len());
-                    return Poll::Ready(Ok(just_content.len()));
+                    panic!("Shouldn't happen??!")
                 }
                 dbg!(&bytes_read);
                 dbg!(self.read_remainder.len());
                 let remainder_len = self.read_remainder.len();
                 let mut remainder_plus_read =
                     [self.read_remainder.as_slice(), read_buf.as_slice()].concat();
-                let mut cursord = Cursor::new(&remainder_plus_read);
-                // If for whatever reason we read only a partial packet, or we read a packet
-                // plus some extra last go-round, we can get an unexpected eof error deserializing,
-                // so (TODO: ACTUALLY DETECT IT) we detect that and continue
-                // TODO: IDEA -- use AsyncBufRead for this? Since I am now in fact buffering?
-                //   it seems bad/verboten to not have the bytes read from the source == bytes
-                //   copied into buf
-                let deser_res = bincode::deserialize_from(&mut cursord);
-                let cursor_pos = cursord.position();
                 // Drop portion of the buffer which is just useless zero padding, if any.
                 let useless_buffer_bytes = read_buf.len() - *bytes_read;
                 remainder_plus_read.split_off(remainder_plus_read.len() - useless_buffer_bytes);
-
-                dbg!(&cursor_pos);
-                let packet: EncryptedPacket = match deser_res {
-                    Ok(p) => {
-                        // Drop however much of the buffer we *did* read
-                        self.read_remainder = remainder_plus_read.split_off(cursor_pos as usize);
-                        p
-                    }
-                    Err(e) => {
-                        // TODO: Match unexpected EOF
-                        dbg!(e);
-                        // If we did not read a packet succesfully, store the portion we received
-                        // in the remainder
-                        let remaining = self.read_remainder.split_off(cursor_pos as usize);
-                        dbg!(remaining.len());
-                        dbg!(self.read_remainder.len());
-                        if remaining.len() == 0 {
-                            dbg!("No extra");
-                            //                            cx.waker().wake_by_ref();
-                            //                            return Poll::Pending;
-                        }
-                        return Poll::Ready(Ok(self.read_remainder.len()));
-                    }
-                };
-                let mut decrypt_buff = packet.data;
-                dbg!(&decrypt_buff.len());
-                if decrypt_buff.is_empty() {
-                    return Poll::Ready(Ok(*bytes_read));
+                let written =
+                    self.read_packets_from_buffer(&mut read_buf, &mut remainder_plus_read, buf);
+                if written == 0 {
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending;
                 }
-
-                let just_content = self
-                    .key
-                    .open_in_place(nonce, Aad::empty(), &mut decrypt_buff)
-                    .unwrap();
-                let mut cursor = Cursor::new(buf);
-                Write::write_all(&mut cursor, &just_content).expect("Internal write");
-                dbg!(just_content.len());
-                //                return Poll::Ready(Ok(*bytes_read));
-                return Poll::Ready(Ok(just_content.len()));
+                return Poll::Ready(Ok(written));
             }
             _ => (),
         };
         read
+    }
+}
+
+impl<'a, S> EncryptedStream<'a, S>
+where
+    S: AsyncRead + AsyncWrite,
+{
+    fn read_packets_from_buffer(
+        mut self: Pin<&mut Self>,
+        read_buf: &mut [u8],
+        remainder_plus_read: &mut Vec<u8>,
+        write_into: &mut [u8],
+    ) -> usize {
+        let mut read_cursor = Cursor::new(&remainder_plus_read);
+        let mut write_cursor = Cursor::new(write_into);
+        let mut total_written = 0;
+        let mut successfull_buffer_advance = 0;
+        dbg!(remainder_plus_read.len());
+
+        loop {
+            dbg!("loopstart", &read_cursor.position());
+            // TODO: doesn't belong here
+            let nonce = Nonce::assume_unique_for_key([0; 12]);
+
+            let cursor_pos_pre_deserialize_attempt = read_cursor.position();
+            let deser_res: Result<EncryptedPacket, _> = bincode::deserialize_from(&mut read_cursor);
+            let cursor_pos = read_cursor.position();
+
+            dbg!(&cursor_pos);
+            match deser_res {
+                Ok(packet) => {
+                    successfull_buffer_advance = cursor_pos;
+                    let mut decrypt_buff = packet.data;
+                    dbg!(&decrypt_buff.len());
+                    if decrypt_buff.is_empty() {
+                        dbg!("Buffer empty, exiting");
+                        break;
+                    }
+
+                    let just_content = self
+                        .key
+                        .open_in_place(nonce, Aad::empty(), &mut decrypt_buff)
+                        .unwrap();
+                    match Write::write_all(&mut write_cursor, &just_content) {
+                        Ok(_) => {
+                            dbg!(just_content.len());
+                            total_written += just_content.len();
+                        }
+                        Err(_) => {
+                            // TODO: How to avoid? Reducing size of buffer that the underlying
+                            //   poll reads into helped, but didn't totally eliminate.
+                            dbg!("Oh no big problems!!!");
+                            self.unwritten.push(just_content.to_vec());
+                        }
+                    }
+                }
+                // TODO: Actually detect unexpected eof
+                // When deserialization fails because of unexpected eof, we have a partial packet,
+                // so the goal is to store it in the remainder and exit
+                Err(e) => {
+                    dbg!(e);
+                    break;
+                }
+            };
+        }
+
+        // Drop however much of the buffer we *did* read
+        self.read_remainder = remainder_plus_read.split_off(successfull_buffer_advance as usize);
+
+        dbg!(total_written);
+        total_written
     }
 }
