@@ -9,7 +9,7 @@ use runtime::{
     spawn,
     task::JoinHandle,
 };
-use x25519_dalek::{EphemeralSecret, StaticSecret};
+use x25519_dalek::EphemeralSecret;
 
 /// File server for hubtain's srv mode
 pub struct FileSrv<T>
@@ -64,9 +64,10 @@ where
             self.tcp_sock,
             self.data,
             self.stay_alive,
-            match self.encrypted {
-                true => EncryptionType::Ephemeral,
-                false => EncryptionType::None,
+            if self.encrypted {
+                EncryptionType::Ephemeral
+            } else {
+                EncryptionType::None
             },
         ));
 
@@ -128,7 +129,6 @@ where
                         info!(LOG, "Client downloading!");
                         data_src.copy_into(&mut stream).await?;
                     }
-                    _ => unimplemented!(),
                 };
                 Ok(())
             });
@@ -144,7 +144,8 @@ where
 #[derive(Clone)]
 enum EncryptionType {
     None,
-    Static(StaticSecret),
+    // TODO: Implement static keys
+    //    Static(StaticSecret),
     Ephemeral,
 }
 

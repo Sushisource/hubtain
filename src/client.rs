@@ -125,6 +125,7 @@ impl DownloadClient {
     }
 
     /// downloads server data to a vec
+    #[cfg(test)]
     pub async fn download_to_vec(self) -> Result<Vec<u8>, Error> {
         let mut download = Vec::with_capacity(2056);
         let data_len = self.server_info.data_len as usize;

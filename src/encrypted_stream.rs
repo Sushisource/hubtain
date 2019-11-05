@@ -59,7 +59,7 @@ pub struct EncryptedStream<'a, S: AsyncWrite + AsyncRead> {
     underlying: Pin<&'a mut S>,
     key: LessSafeKey,
     read_remainder: Vec<u8>,
-    unwritten: Vec<Vec<u8>>
+    unwritten: Vec<Vec<u8>>,
 }
 
 impl<'a, S> EncryptedStream<'a, S>
@@ -76,12 +76,13 @@ where
             underlying,
             key,
             read_remainder: vec![],
-            unwritten: vec![]
+            unwritten: vec![],
         })
     }
 }
 
 const CHUNK_SIZE: usize = 5012;
+
 #[derive(Serialize, Deserialize)]
 struct EncryptedPacket {
     data: Vec<u8>,
@@ -113,9 +114,7 @@ where
             .as_mut()
             .poll_write(cx, bincoded.as_slice())
             .map(|r| match r {
-                Ok(_) => {
-                    Ok(bufsiz)
-                }
+                Ok(_) => Ok(bufsiz),
                 o => o,
             })
     }
@@ -136,44 +135,40 @@ where
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
-        buf: &mut [u8],
+        mut buf: &mut [u8],
     ) -> Poll<Result<usize, io::Error>> {
         dbg!("!!!!!!!!!!!!!!!!!", buf.len());
 
         let mut written_from_unwritten = 0;
         while let Some(unwritten) = self.unwritten.pop() {
             dbg!("Writing reserved packet");
-            Write::write_all(&mut buf.as_mut(), &unwritten).expect("Must work");
+            Write::write_all(&mut buf, &unwritten).expect("Must work");
             written_from_unwritten += unwritten.len();
         }
 
         let mut read_buf = vec![0; buf.len()];
         let read = self.underlying.as_mut().poll_read(cx, &mut read_buf);
 
-        match &read {
-            Poll::Ready(Ok(bytes_read)) => {
-                if *bytes_read == 0 {
-                    if self.read_remainder.is_empty() {
-                        return Poll::Ready(Ok(written_from_unwritten));
-                    }
-                    panic!("Should be unreachable");
+        if let Poll::Ready(Ok(bytes_read)) = &read {
+            if *bytes_read == 0 {
+                if self.read_remainder.is_empty() {
+                    return Poll::Ready(Ok(written_from_unwritten));
                 }
-                dbg!(&bytes_read);
-                dbg!(self.read_remainder.len());
-                let mut remainder_plus_read =
-                    [self.read_remainder.as_slice(), read_buf.as_slice()].concat();
-                // Drop portion of the buffer which is just useless zero padding, if any.
-                let useless_buffer_bytes = read_buf.len() - *bytes_read;
-                remainder_plus_read.split_off(remainder_plus_read.len() - useless_buffer_bytes);
-                let written =
-                    self.read_packets_from_buffer(&mut remainder_plus_read, buf);
-                if written == 0 {
-                    cx.waker().wake_by_ref();
-                    return Poll::Pending;
-                }
-                return Poll::Ready(Ok(written));
+                panic!("Should be unreachable");
             }
-            _ => (),
+            dbg!(&bytes_read);
+            dbg!(self.read_remainder.len());
+            let mut remainder_plus_read =
+                [self.read_remainder.as_slice(), read_buf.as_slice()].concat();
+            // Drop portion of the buffer which is just useless zero padding, if any.
+            let useless_buffer_bytes = read_buf.len() - *bytes_read;
+            remainder_plus_read.split_off(remainder_plus_read.len() - useless_buffer_bytes);
+            let written = self.read_packets_from_buffer(&mut remainder_plus_read, buf);
+            if written == 0 {
+                cx.waker().wake_by_ref();
+                return Poll::Pending;
+            }
+            return Poll::Ready(Ok(written));
         };
         read
     }
