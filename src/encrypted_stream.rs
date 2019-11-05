@@ -103,20 +103,17 @@ where
         let mut encrypt_me = vec![0; siz];
         encrypt_me.copy_from_slice(&buf[0..siz]);
         let bufsiz = encrypt_me.len();
-        //        dbg!(&bufsiz);
         self.key
             .seal_in_place_append_tag(nonce, Aad::empty(), &mut encrypt_me)
             .unwrap();
 
-        //        dbg!(encrypt_me.len());
         let packet = EncryptedPacket { data: encrypt_me };
         let bincoded = bincode::serialize(&packet).unwrap();
         self.underlying
             .as_mut()
             .poll_write(cx, bincoded.as_slice())
             .map(|r| match r {
-                Ok(really_wrote) => {
-                    //                    dbg!(really_wrote);
+                Ok(_) => {
                     Ok(bufsiz)
                 }
                 o => o,
@@ -141,6 +138,7 @@ where
         cx: &mut Context,
         buf: &mut [u8],
     ) -> Poll<Result<usize, io::Error>> {
+        dbg!("!!!!!!!!!!!!!!!!!", buf.len());
 
         let mut written_from_unwritten = 0;
         while let Some(unwritten) = self.unwritten.pop() {
@@ -149,32 +147,26 @@ where
             written_from_unwritten += unwritten.len();
         }
 
-        // TODO: have both sides agree on nonce sequence somehow?
-        let nonce = Nonce::assume_unique_for_key([0; 12]);
-
-        // TODO: How to ensure sufficient padding here...?
         let mut read_buf = vec![0; buf.len()];
         let read = self.underlying.as_mut().poll_read(cx, &mut read_buf);
 
         match &read {
             Poll::Ready(Ok(bytes_read)) => {
                 if *bytes_read == 0 {
-                    dbg!("WAAAAAAAAAAAAAAAHHH");
                     if self.read_remainder.is_empty() {
                         return Poll::Ready(Ok(written_from_unwritten));
                     }
-                    panic!("Shouldn't happen??!")
+                    panic!("Should be unreachable");
                 }
                 dbg!(&bytes_read);
                 dbg!(self.read_remainder.len());
-                let remainder_len = self.read_remainder.len();
                 let mut remainder_plus_read =
                     [self.read_remainder.as_slice(), read_buf.as_slice()].concat();
                 // Drop portion of the buffer which is just useless zero padding, if any.
                 let useless_buffer_bytes = read_buf.len() - *bytes_read;
                 remainder_plus_read.split_off(remainder_plus_read.len() - useless_buffer_bytes);
                 let written =
-                    self.read_packets_from_buffer(&mut read_buf, &mut remainder_plus_read, buf);
+                    self.read_packets_from_buffer(&mut remainder_plus_read, buf);
                 if written == 0 {
                     cx.waker().wake_by_ref();
                     return Poll::Pending;
@@ -193,7 +185,6 @@ where
 {
     fn read_packets_from_buffer(
         mut self: Pin<&mut Self>,
-        read_buf: &mut [u8],
         remainder_plus_read: &mut Vec<u8>,
         write_into: &mut [u8],
     ) -> usize {
@@ -208,7 +199,6 @@ where
             // TODO: doesn't belong here
             let nonce = Nonce::assume_unique_for_key([0; 12]);
 
-            let cursor_pos_pre_deserialize_attempt = read_cursor.position();
             let deser_res: Result<EncryptedPacket, _> = bincode::deserialize_from(&mut read_cursor);
             let cursor_pos = read_cursor.position();
 
@@ -232,10 +222,12 @@ where
                             dbg!(just_content.len());
                             total_written += just_content.len();
                         }
-                        Err(_) => {
+                        Err(e) => {
                             // TODO: How to avoid? Reducing size of buffer that the underlying
-                            //   poll reads into helped, but didn't totally eliminate.
-                            dbg!("Oh no big problems!!!");
+                            //   poll reads into helped, but didn't totally eliminate. May simply
+                            //   not be able to, as it looks like writing three packets in a row
+                            //   is too much, but it only seems to happen at the end.
+                            dbg!("Couldn't write all decrypted data into buffer!", e);
                             self.unwritten.push(just_content.to_vec());
                         }
                     }
