@@ -10,10 +10,7 @@ anyhow = "1.0"
 clap = "2"
 derive-new = "0.5"
 indicatif = "0.11"
-tokio = "0.1"
-futures-preview = { version = "=0.3.0-alpha.18", features = ["io-compat", "async-await", "nightly"] }
-futures-select-macro-preview = "0.3.0-alpha.18"
-futures01 = { package = "futures", version = "0.1" }
+futures = "0.3"
 get_if_addrs = "0.5"
 rand = "0.6"
 ring = "0.16"

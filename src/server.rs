@@ -7,7 +7,7 @@ use async_std::{
     task::{spawn, JoinHandle},
 };
 use bincode::serialize;
-use futures::io::{AsyncRead, AsyncReadExt};
+use futures::io::AsyncRead;
 use rand::rngs::OsRng;
 use x25519_dalek::EphemeralSecret;
 
@@ -101,13 +101,15 @@ where
                         let secret = EphemeralSecret::new(&mut rng);
                         let enc_stream = EncryptedStreamStarter::new(&mut stream, secret);
                         info!(LOG, "Client downloading!");
-                        data_src
-                            .copy_into(&mut enc_stream.key_exchange(client_strat).await?)
-                            .await?;
+                        futures::io::copy(
+                            data_src,
+                            &mut enc_stream.key_exchange(client_strat).await?,
+                        )
+                        .await?;
                     }
                     EncryptionType::None => {
                         info!(LOG, "Client downloading!");
-                        data_src.copy_into(&mut stream).await?;
+                        futures::io::copy(data_src, &mut stream).await?;
                     }
                 };
                 Ok(())

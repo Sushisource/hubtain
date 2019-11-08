@@ -1,30 +1,24 @@
 use crate::{
-    encrypted_stream::EncryptedStreamStarter,
-    server::ClientApprovalStrategy,
-    filewriter::AsyncFileWriter,
-    models::HandshakeReply,
-    BROADCAST_ADDR,
-    LOG
+    encrypted_stream::EncryptedStreamStarter, filewriter::AsyncFileWriter, models::HandshakeReply,
+    server::ClientApprovalStrategy, BROADCAST_ADDR, LOG,
 };
 use anyhow::{anyhow, Error};
 use async_std::{
+    future::{self, timeout},
     net::{TcpStream, UdpSocket},
-    future::timeout
+    prelude::FutureExt,
 };
 use bincode::deserialize;
-use futures::{
-    compat::Future01CompatExt, io::AsyncReadExt, select, AsyncWrite, FutureExt as OFutureExt,
-};
+use futures::{select, AsyncWrite, FutureExt as OFutureExt};
 use indicatif::ProgressBar;
 use rand::rngs::OsRng;
-use std::fs::OpenOptions;
 use std::{
+    fs::OpenOptions,
     net::SocketAddr,
     path::PathBuf,
     sync::{atomic::AtomicUsize, atomic::Ordering, Arc},
-    time::{Duration, Instant},
+    time::Duration,
 };
-use tokio::{timer::Delay};
 use x25519_dalek::EphemeralSecret;
 
 /// Client for hubtain's fetch mode
@@ -157,9 +151,9 @@ impl DownloadClient {
                 .key_exchange(ClientApprovalStrategy::ApproveAll)
                 .await?;
 
-            enc_stream.copy_into(&mut download).await
+            futures::io::copy(enc_stream, &mut download).await
         } else {
-            self.stream.copy_into(download).await
+            futures::io::copy(self.stream, &mut download).await
         }
         .map_err(Into::into)
     }
@@ -169,9 +163,7 @@ async fn progress_counter(progress: Arc<AtomicUsize>, total_size: u64) {
     let pbar = ProgressBar::new(total_size);
     loop {
         // The delay works best first to avoid printing a 0 for no reason
-        let _ = Delay::new(Instant::now() + Duration::from_millis(100))
-            .compat()
-            .await;
+        let _ = future::ready(()).delay(Duration::from_millis(100)).await;
         let bytes_read = progress.as_ref().load(Ordering::Relaxed);
         pbar.set_position(bytes_read as u64);
     }
@@ -209,7 +201,7 @@ async fn read_replies_for(
             }
             Ok(Err(e)) => return Err(e.into()),
             Err(_) => {
-                    break;
+                break;
             }
         }
     }

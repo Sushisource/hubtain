@@ -30,9 +30,9 @@ use broadcast_addr_picker::select_broadcast_addr;
 use clap::AppSettings;
 use colored::Colorize;
 use slog::Drain;
-use std::{net::IpAddr, path::PathBuf, time::Duration};
 #[cfg(test)]
 use std::net::Ipv4Addr;
+use std::{net::IpAddr, path::PathBuf, time::Duration};
 
 #[cfg(not(test))]
 lazy_static! {
@@ -110,7 +110,8 @@ fn main() -> Result<(), Error> {
                     .set_stayalive(sc.is_present("stayalive"))
                     .set_encryption(encryption)
                     .set_approval_strategy(approval_strat)
-                    .build().await?;
+                    .build()
+                    .await?;
                 fsrv.serve().await?;
             }
             ("fetch", Some(sc)) => {
@@ -273,7 +274,9 @@ mod test {
             let file_siz = test_file.file_size;
             let fsrv = FileSrvBuilder::new(test_file, file_siz)
                 .set_encryption(true)
+                .set_approval_strategy(ClientApprovalStrategy::ApproveAll)
                 .build()
+                .await
                 .unwrap();
             let udp_port = fsrv.udp_port().unwrap();
             let _ = spawn(fsrv.serve());
