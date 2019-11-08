@@ -57,9 +57,7 @@ where
 
         match approval_strat {
             ClientApprovalStrategy::ApproveAll => (),
-            ClientApprovalStrategy::Interative => {
-                unimplemented!()
-            }
+            ClientApprovalStrategy::Interative => unimplemented!(),
         };
 
         // Compute shared secret

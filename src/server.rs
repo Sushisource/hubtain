@@ -1,14 +1,14 @@
-use crate::encrypted_stream::EncryptedStreamStarter;
-use crate::{mnemonic::random_word, models::HandshakeReply, LOG};
+use crate::{
+    encrypted_stream::EncryptedStreamStarter, mnemonic::random_word, models::HandshakeReply, LOG,
+};
 use anyhow::Error;
+use async_std::{
+    net::{TcpListener, UdpSocket},
+    task::{spawn, JoinHandle},
+};
 use bincode::serialize;
 use futures::io::{AsyncRead, AsyncReadExt};
 use rand::rngs::OsRng;
-use runtime::{
-    net::{TcpListener, UdpSocket},
-    spawn,
-    task::JoinHandle,
-};
 use x25519_dalek::EphemeralSecret;
 
 /// File server for hubtain's srv mode
@@ -31,7 +31,7 @@ where
     T: 'static + AsyncRead + Send + Unpin + Clone,
 {
     /// Begin listening for connections and serving data.
-    pub async fn serve(mut self) -> Result<(), Error> {
+    pub async fn serve(self) -> Result<(), Error> {
         info!(LOG, "Server name: {}", self.name);
         let tcp_port = self.tcp_sock.local_addr()?.port();
 
@@ -47,7 +47,7 @@ where
             } else {
                 EncryptionType::None
             },
-            self.client_approval_strategy
+            self.client_approval_strategy,
         ));
 
         // Wait for broadcast from peer
@@ -80,11 +80,11 @@ where
     /// The data srv runs independently of the main srv loop, and does the job of actually
     /// transferring data to clients.
     async fn data_srv(
-        mut tcp_sock: TcpListener,
+        tcp_sock: TcpListener,
         data: T,
         stay_alive: bool,
         enctype: EncryptionType,
-        client_strat: ClientApprovalStrategy
+        client_strat: ClientApprovalStrategy,
     ) -> Result<(), Error> {
         info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
         loop {
@@ -208,9 +208,9 @@ where
         self
     }
 
-    pub fn build(self) -> Result<FileSrv<T>, Error> {
-        let tcp_sock = TcpListener::bind(format!("{}:0", &self.listen_addr))?;
-        let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port))?;
+    pub async fn build(self) -> Result<FileSrv<T>, Error> {
+        let tcp_sock = TcpListener::bind(format!("{}:0", &self.listen_addr)).await?;
+        let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port)).await?;
         let name = random_word();
         Ok(FileSrv {
             stay_alive: self.stay_alive,

@@ -1,14 +1,22 @@
-use crate::encrypted_stream::EncryptedStreamStarter;
-use crate::{filewriter::AsyncFileWriter, models::HandshakeReply, BROADCAST_ADDR, LOG};
+use crate::{
+    encrypted_stream::EncryptedStreamStarter,
+    server::ClientApprovalStrategy,
+    filewriter::AsyncFileWriter,
+    models::HandshakeReply,
+    BROADCAST_ADDR,
+    LOG
+};
 use anyhow::{anyhow, Error};
+use async_std::{
+    net::{TcpStream, UdpSocket},
+    future::timeout
+};
 use bincode::deserialize;
 use futures::{
     compat::Future01CompatExt, io::AsyncReadExt, select, AsyncWrite, FutureExt as OFutureExt,
-    TryFutureExt,
 };
 use indicatif::ProgressBar;
 use rand::rngs::OsRng;
-use runtime::net::{TcpStream, UdpSocket};
 use std::fs::OpenOptions;
 use std::{
     net::SocketAddr,
@@ -16,9 +24,8 @@ use std::{
     sync::{atomic::AtomicUsize, atomic::Ordering, Arc},
     time::{Duration, Instant},
 };
-use tokio::{prelude::FutureExt, timer::Delay};
+use tokio::{timer::Delay};
 use x25519_dalek::EphemeralSecret;
-use crate::server::ClientApprovalStrategy;
 
 /// Client for hubtain's fetch mode
 pub struct DownloadClient {
@@ -38,7 +45,7 @@ impl DownloadClient {
     {
         let broadcast_addr = SocketAddr::new(*BROADCAST_ADDR, udp_port);
         info!(LOG, "Client broadcasting to {}", &broadcast_addr);
-        let mut client_s = UdpSocket::bind("0.0.0.0:0")?;
+        let mut client_s = UdpSocket::bind("0.0.0.0:0").await?;
         client_s.set_broadcast(true)?;
         let ping = vec![0];
         client_s.send_to(&ping, broadcast_addr).await?;
@@ -146,7 +153,9 @@ impl DownloadClient {
             let secret = EphemeralSecret::new(&mut rng);
             let enc_stream = EncryptedStreamStarter::new(&mut self.stream, secret);
             info!(LOG, "Client encrypytion handshaking");
-            let enc_stream = enc_stream.key_exchange(ClientApprovalStrategy::ApproveAll).await?;
+            let enc_stream = enc_stream
+                .key_exchange(ClientApprovalStrategy::ApproveAll)
+                .await?;
 
             enc_stream.copy_into(&mut download).await
         } else {
@@ -193,22 +202,14 @@ async fn read_replies_for(
     let mut buf = vec![0u8; 100];
     let mut retme = vec![];
     loop {
-        match sock
-            .recv_from(&mut buf)
-            .compat()
-            .timeout(duration)
-            .compat()
-            .await
-        {
-            Ok((_, peer)) => {
+        match timeout(duration, sock.recv_from(&mut buf)).await {
+            Ok(Ok((_, peer))) => {
                 let cur_content = buf.to_vec();
                 retme.push((cur_content, peer));
             }
-            Err(e) => {
-                if e.is_elapsed() {
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => {
                     break;
-                }
-                return Err(e.into());
             }
         }
     }
