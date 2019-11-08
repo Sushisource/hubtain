@@ -18,7 +18,7 @@ mod mnemonic;
 mod models;
 mod server;
 
-use crate::server::FileSrvBuilder;
+use crate::server::{ClientApprovalStrategy, FileSrvBuilder};
 use crate::{client::DownloadClient, filereader::AsyncFileReader};
 use anyhow::{anyhow, Error};
 #[cfg(not(test))]
@@ -96,10 +96,17 @@ async fn main() -> Result<(), Error> {
             info!(LOG, "Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
             let file_siz = serv_file.file_size;
+            let encryption = !sc.is_present("no_encryption");
+            let approval_strat = if encryption {
+                ClientApprovalStrategy::Interative
+            } else {
+                ClientApprovalStrategy::ApproveAll
+            };
             let fsrv = FileSrvBuilder::new(serv_file, file_siz)
                 .set_udp_port(42444)
                 .set_stayalive(sc.is_present("stayalive"))
-                .set_encryption(!sc.is_present("no_encryption"))
+                .set_encryption(encryption)
+                .set_approval_strategy(approval_strat)
                 .build()?;
             fsrv.serve().await?;
         }
@@ -123,6 +130,7 @@ async fn main() -> Result<(), Error> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::server::ClientApprovalStrategy;
     use crate::{client::test_srvr_sel, filereader::AsyncFileReader, server::FileSrvBuilder};
     use runtime::spawn;
     use std::{fs::File, io::Read};
@@ -150,6 +158,7 @@ mod test {
     async fn encrypted_transfer() {
         let fsrv = FileSrvBuilder::new(TEST_DATA, TEST_DATA.len() as u64)
             .set_encryption(true)
+            .set_approval_strategy(ClientApprovalStrategy::ApproveAll)
             .build()
             .unwrap();
         let udp_port = fsrv.udp_port().unwrap();

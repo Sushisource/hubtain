@@ -1,3 +1,4 @@
+use crate::server::ClientApprovalStrategy;
 use anyhow::{anyhow, Error};
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
@@ -31,7 +32,11 @@ where
     /// Performs DH key exchange with the other side of the stream. Returns a new version
     /// of the stream that can be read/write from, transparently encrypting/decrypting the
     /// data.
-    pub async fn key_exchange(mut self) -> Result<EncryptedStream<'a, S>, Error> {
+    pub async fn key_exchange(
+        mut self,
+        // TODO: Param doesn't make sense for a a client using an encrypted stream
+        approval_strat: ClientApprovalStrategy,
+    ) -> Result<EncryptedStream<'a, S>, Error> {
         let pubkey = PublicKey::from(&self.secret);
         let outgoing_hs = Handshake {
             pkey: *pubkey.as_bytes(),
@@ -46,8 +51,19 @@ where
         self.underlying.read_exact(&mut buff).await?;
         let read_hs: Handshake = bincode::deserialize_from(buff.as_slice())?;
 
+        let their_pubkey: PublicKey = read_hs.pkey.into();
+        let pubkey_mnemonic = mnemonic::to_string(&their_pubkey.as_bytes());
+        dbg!(pubkey_mnemonic);
+
+        match approval_strat {
+            ClientApprovalStrategy::ApproveAll => (),
+            ClientApprovalStrategy::Interative => {
+                unimplemented!()
+            }
+        };
+
         // Compute shared secret
-        let shared_secret = self.secret.diffie_hellman(&read_hs.pkey.into());
+        let shared_secret = self.secret.diffie_hellman(&their_pubkey);
 
         // TODO: Agree on nonce sequence here?
 

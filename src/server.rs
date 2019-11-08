@@ -23,35 +23,13 @@ where
     data_length: u64,
     name: String,
     encrypted: bool,
+    client_approval_strategy: ClientApprovalStrategy,
 }
 
 impl<T> FileSrv<T>
 where
     T: 'static + AsyncRead + Send + Unpin + Clone,
 {
-    /// Create a new `FileSrv` given UDP and TCP sockets to listen on and some data source to serve
-    /// If `stay_alive` is false, the server will shut down after serving the data to the first
-    /// client who downloads it.
-    pub fn new(
-        udp_sock: UdpSocket,
-        tcp_sock: TcpListener,
-        data: T,
-        data_length: u64,
-        stay_alive: bool,
-        encrypted: bool,
-    ) -> Self {
-        let name = random_word();
-        FileSrv {
-            stay_alive,
-            udp_sock,
-            tcp_sock,
-            data,
-            data_length,
-            name: name.to_string(),
-            encrypted,
-        }
-    }
-
     /// Begin listening for connections and serving data.
     pub async fn serve(mut self) -> Result<(), Error> {
         info!(LOG, "Server name: {}", self.name);
@@ -69,6 +47,7 @@ where
             } else {
                 EncryptionType::None
             },
+            self.client_approval_strategy
         ));
 
         // Wait for broadcast from peer
@@ -105,6 +84,7 @@ where
         data: T,
         stay_alive: bool,
         enctype: EncryptionType,
+        client_strat: ClientApprovalStrategy
     ) -> Result<(), Error> {
         info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
         loop {
@@ -116,13 +96,13 @@ where
             let h: JoinHandle<Result<(), Error>> = spawn(async move {
                 match enctype {
                     EncryptionType::Ephemeral => {
+                        info!(LOG, "Server handshaking");
                         let mut rng = OsRng::new().unwrap();
                         let secret = EphemeralSecret::new(&mut rng);
                         let enc_stream = EncryptedStreamStarter::new(&mut stream, secret);
-                        info!(LOG, "Server handshaking");
                         info!(LOG, "Client downloading!");
                         data_src
-                            .copy_into(&mut enc_stream.key_exchange().await?)
+                            .copy_into(&mut enc_stream.key_exchange(client_strat).await?)
                             .await?;
                     }
                     EncryptionType::None => {
@@ -149,6 +129,12 @@ enum EncryptionType {
     Ephemeral,
 }
 
+#[derive(Clone, Copy)]
+pub enum ClientApprovalStrategy {
+    Interative,
+    ApproveAll,
+}
+
 pub struct FileSrvBuilder<T>
 where
     T: 'static + AsyncRead + Send + Unpin + Clone,
@@ -159,6 +145,7 @@ where
     stay_alive: bool,
     encryption: bool,
     listen_addr: String,
+    client_approval_strategy: ClientApprovalStrategy,
 }
 
 #[cfg(not(test))]
@@ -195,6 +182,7 @@ where
             stay_alive: false,
             encryption: false,
             listen_addr: DEFAULT_TCP_LISTEN_ADDR.to_string(),
+            client_approval_strategy: ClientApprovalStrategy::Interative,
         }
     }
 
@@ -213,16 +201,26 @@ where
         self
     }
 
+    // TODO: Approval strategy is (at least for now) only needed in encrypted mode,
+    //  so could have `EncryptedFileSrvBuilder` etc to make type safe
+    pub fn set_approval_strategy(mut self, strat: ClientApprovalStrategy) -> Self {
+        self.client_approval_strategy = strat;
+        self
+    }
+
     pub fn build(self) -> Result<FileSrv<T>, Error> {
         let tcp_sock = TcpListener::bind(format!("{}:0", &self.listen_addr))?;
         let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port))?;
-        Ok(FileSrv::new(
+        let name = random_word();
+        Ok(FileSrv {
+            stay_alive: self.stay_alive,
             udp_sock,
             tcp_sock,
-            self.data,
-            self.data_len,
-            self.stay_alive,
-            self.encryption,
-        ))
+            data: self.data,
+            data_length: self.data_len,
+            name: name.to_string(),
+            encrypted: self.encryption,
+            client_approval_strategy: self.client_approval_strategy,
+        })
     }
 }

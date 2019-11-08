@@ -18,6 +18,7 @@ use std::{
 };
 use tokio::{prelude::FutureExt, timer::Delay};
 use x25519_dalek::EphemeralSecret;
+use crate::server::ClientApprovalStrategy;
 
 /// Client for hubtain's fetch mode
 pub struct DownloadClient {
@@ -145,7 +146,7 @@ impl DownloadClient {
             let secret = EphemeralSecret::new(&mut rng);
             let enc_stream = EncryptedStreamStarter::new(&mut self.stream, secret);
             info!(LOG, "Client encrypytion handshaking");
-            let enc_stream = enc_stream.key_exchange().await?;
+            let enc_stream = enc_stream.key_exchange(ClientApprovalStrategy::ApproveAll).await?;
 
             enc_stream.copy_into(&mut download).await
         } else {
