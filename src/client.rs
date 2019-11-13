@@ -131,7 +131,6 @@ impl DownloadClient {
     pub async fn download_to_vec(self) -> Result<Vec<u8>, Error> {
         let mut download = Vec::with_capacity(2056);
         let data_len = self.server_info.data_len as usize;
-        dbg!(&data_len);
         self.drain_downloaded_to_stream(&mut download).await?;
         // Truncate any extra padding that may have been read
         download.split_off(data_len);
@@ -163,7 +162,7 @@ async fn progress_counter(progress: Arc<AtomicUsize>, total_size: u64) {
     let pbar = ProgressBar::new(total_size);
     loop {
         // The delay works best first to avoid printing a 0 for no reason
-        let _ = future::ready(()).delay(Duration::from_millis(100)).await;
+        future::ready(()).delay(Duration::from_millis(100)).await;
         let bytes_read = progress.as_ref().load(Ordering::Relaxed);
         pbar.set_position(bytes_read as u64);
     }

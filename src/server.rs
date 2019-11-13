@@ -126,14 +126,12 @@ where
 #[derive(Clone)]
 enum EncryptionType {
     None,
-    // TODO: Implement static keys
-    //    Static(StaticSecret),
     Ephemeral,
 }
 
 #[derive(Clone, Copy)]
 pub enum ClientApprovalStrategy {
-    Interative,
+    Interactive,
     ApproveAll,
 }
 
@@ -184,7 +182,7 @@ where
             stay_alive: false,
             encryption: false,
             listen_addr: DEFAULT_TCP_LISTEN_ADDR.to_string(),
-            client_approval_strategy: ClientApprovalStrategy::Interative,
+            client_approval_strategy: ClientApprovalStrategy::Interactive,
         }
     }
 

@@ -5,7 +5,8 @@ authors = ["Spencer Judge <spencer@xand.me>"]
 edition = "2018"
 
 [dependencies]
-async-std = { features = ["unstable"], version = "0.99"}
+async-std = { features = ["unstable"], version = "1" }
+async-trait = "0.1.17"
 anyhow = "1.0"
 clap = "2"
 derive-new = "0.5"

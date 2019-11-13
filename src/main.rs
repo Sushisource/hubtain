@@ -11,6 +11,7 @@ extern crate derive_new;
 
 mod broadcast_addr_picker;
 mod client;
+mod client_approver;
 mod encrypted_stream;
 mod filereader;
 mod filewriter;
@@ -101,7 +102,7 @@ fn main() -> Result<(), Error> {
                 let file_siz = serv_file.file_size;
                 let encryption = !sc.is_present("no_encryption");
                 let approval_strat = if encryption {
-                    ClientApprovalStrategy::Interative
+                    ClientApprovalStrategy::Interactive
                 } else {
                     ClientApprovalStrategy::ApproveAll
                 };
@@ -135,8 +136,10 @@ fn main() -> Result<(), Error> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::server::ClientApprovalStrategy;
-    use crate::{client::test_srvr_sel, filereader::AsyncFileReader, server::FileSrvBuilder};
+    use crate::{
+        client::test_srvr_sel, filereader::AsyncFileReader, server::ClientApprovalStrategy,
+        server::FileSrvBuilder,
+    };
     use async_std::task::spawn;
     use std::{fs::File, io::Read};
     use tempfile::NamedTempFile;
@@ -179,7 +182,6 @@ mod test {
                 .unwrap();
             let content = client.download_to_vec().await.unwrap();
             server_f.await.unwrap();
-            dbg!(hex::encode(&TEST_DATA));
             assert_eq!(content, TEST_DATA);
         })
     }

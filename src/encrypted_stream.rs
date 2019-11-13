@@ -1,4 +1,8 @@
-use crate::server::ClientApprovalStrategy;
+use crate::{
+    client_approver::{ClientApprover, CONSOLE_APPROVER},
+    server::ClientApprovalStrategy,
+    LOG,
+};
 use anyhow::{anyhow, Error};
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
@@ -34,7 +38,9 @@ where
     /// data.
     pub async fn key_exchange(
         mut self,
-        // TODO: Param doesn't make sense for a a client using an encrypted stream
+        // TODO: Param doesn't make sense for a client using an encrypted stream, since obviously
+        //   they want to download from the server. Fix with builder or something.
+        //   Also make this a ClientApprover
         approval_strat: ClientApprovalStrategy,
     ) -> Result<EncryptedStream<'a, S>, Error> {
         let pubkey = PublicKey::from(&self.secret);
@@ -52,12 +58,18 @@ where
         let read_hs: Handshake = bincode::deserialize_from(buff.as_slice())?;
 
         let their_pubkey: PublicKey = read_hs.pkey.into();
-        let pubkey_mnemonic = mnemonic::to_string(&their_pubkey.as_bytes());
-        dbg!(pubkey_mnemonic);
 
         match approval_strat {
             ClientApprovalStrategy::ApproveAll => (),
-            ClientApprovalStrategy::Interative => unimplemented!(),
+            ClientApprovalStrategy::Interactive => {
+                let approved = (&*CONSOLE_APPROVER)
+                    .submit(their_pubkey.as_bytes())
+                    .await?;
+                if !approved {
+                    // TODO: Make a real thing, and handle on connection accept side to not die.
+                    return Err(anyhow!("Client not approved"))
+                }
+            }
         };
 
         // Compute shared secret
@@ -151,11 +163,9 @@ where
         cx: &mut Context,
         mut buf: &mut [u8],
     ) -> Poll<Result<usize, io::Error>> {
-        dbg!("!!!!!!!!!!!!!!!!!", buf.len());
-
         let mut written_from_unwritten = 0;
         while let Some(unwritten) = self.unwritten.pop() {
-            dbg!("Writing reserved packet");
+            debug!(LOG, "Writing reserved packet");
             Write::write_all(&mut buf, &unwritten).expect("Must work");
             written_from_unwritten += unwritten.len();
         }
@@ -170,8 +180,6 @@ where
                 }
                 panic!("Should be unreachable");
             }
-            dbg!(&bytes_read);
-            dbg!(self.read_remainder.len());
             let mut remainder_plus_read =
                 [self.read_remainder.as_slice(), read_buf.as_slice()].concat();
             // Drop portion of the buffer which is just useless zero padding, if any.
@@ -201,24 +209,20 @@ where
         let mut write_cursor = Cursor::new(write_into);
         let mut total_written = 0;
         let mut successfull_buffer_advance = 0;
-        dbg!(remainder_plus_read.len());
 
         loop {
-            dbg!("loopstart", &read_cursor.position());
             // TODO: doesn't belong here
             let nonce = Nonce::assume_unique_for_key([0; 12]);
 
             let deser_res: Result<EncryptedPacket, _> = bincode::deserialize_from(&mut read_cursor);
             let cursor_pos = read_cursor.position();
 
-            dbg!(&cursor_pos);
             match deser_res {
                 Ok(packet) => {
                     successfull_buffer_advance = cursor_pos;
                     let mut decrypt_buff = packet.data;
-                    dbg!(&decrypt_buff.len());
                     if decrypt_buff.is_empty() {
-                        dbg!("Buffer empty, exiting");
+                        debug!(LOG, "Buffer empty, exiting");
                         break;
                     }
 
@@ -228,7 +232,6 @@ where
                         .unwrap();
                     match Write::write_all(&mut write_cursor, &just_content) {
                         Ok(_) => {
-                            dbg!(just_content.len());
                             total_written += just_content.len();
                         }
                         Err(e) => {
@@ -236,25 +239,26 @@ where
                             //   poll reads into helped, but didn't totally eliminate. May simply
                             //   not be able to, as it looks like writing three packets in a row
                             //   is too much, but it only seems to happen at the end.
-                            dbg!("Couldn't write all decrypted data into buffer!", e);
+                            debug!(LOG, "Couldn't write all decrypted data into buffer: {}", e);
                             self.unwritten.push(just_content.to_vec());
                         }
                     }
                 }
-                // TODO: Actually detect unexpected eof
-                // When deserialization fails because of unexpected eof, we have a partial packet,
-                // so the goal is to store it in the remainder and exit
-                Err(e) => {
-                    dbg!(e);
-                    break;
-                }
+                Err(e) => match *e {
+                    // When deserialization fails because of unexpected eof, we have a partial
+                    // packet, so the goal is to store it in the remainder and exit
+                    bincode::ErrorKind::Io(e) => {
+                        debug!(LOG, "Couldn't deserialize whole packet: {}", e);
+                        break;
+                    }
+                    e => panic!(e),
+                },
             };
         }
 
         // Drop however much of the buffer we *did* read
         self.read_remainder = remainder_plus_read.split_off(successfull_buffer_advance as usize);
 
-        dbg!(total_written);
         total_written
     }
 }
