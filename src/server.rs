@@ -1,5 +1,8 @@
 use crate::{
-    encrypted_stream::EncryptedStreamStarter, mnemonic::random_word, models::HandshakeReply, LOG,
+    encrypted_stream::{EncStreamErr, ServerEncryptedStreamStarter},
+    mnemonic::random_word,
+    models::HandshakeReply,
+    LOG,
 };
 use anyhow::Error;
 use async_std::{
@@ -99,13 +102,15 @@ where
                         info!(LOG, "Server handshaking");
                         let mut rng = OsRng::new().unwrap();
                         let secret = EphemeralSecret::new(&mut rng);
-                        let enc_stream = EncryptedStreamStarter::new(&mut stream, secret);
+                        let enc_stream = ServerEncryptedStreamStarter::new(&mut stream, secret);
+                        let mut encrypted_stream = match enc_stream.key_exchange(client_strat).await
+                        {
+                            Ok(es) => es,
+                            Err(EncStreamErr::ClientNotAccepted) => return Ok(()),
+                            e => e?,
+                        };
                         info!(LOG, "Client downloading!");
-                        futures::io::copy(
-                            data_src,
-                            &mut enc_stream.key_exchange(client_strat).await?,
-                        )
-                        .await?;
+                        futures::io::copy(data_src, &mut encrypted_stream).await?;
                     }
                     EncryptionType::None => {
                         info!(LOG, "Client downloading!");
@@ -132,6 +137,7 @@ enum EncryptionType {
 #[derive(Clone, Copy)]
 pub enum ClientApprovalStrategy {
     Interactive,
+    #[cfg(test)]
     ApproveAll,
 }
 
@@ -196,15 +202,13 @@ where
         self
     }
 
-    pub fn set_encryption(mut self, encryption: bool) -> Self {
+    pub fn set_encryption(
+        mut self,
+        encryption: bool,
+        approval_strategy: ClientApprovalStrategy,
+    ) -> Self {
         self.encryption = encryption;
-        self
-    }
-
-    // TODO: Approval strategy is (at least for now) only needed in encrypted mode,
-    //  so could have `EncryptedFileSrvBuilder` etc to make type safe
-    pub fn set_approval_strategy(mut self, strat: ClientApprovalStrategy) -> Self {
-        self.client_approval_strategy = strat;
+        self.client_approval_strategy = approval_strategy;
         self
     }
 

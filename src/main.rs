@@ -6,8 +6,6 @@ extern crate clap;
 extern crate slog;
 #[macro_use]
 extern crate lazy_static;
-#[macro_use]
-extern crate derive_new;
 
 mod broadcast_addr_picker;
 mod client;
@@ -101,16 +99,10 @@ fn main() -> Result<(), Error> {
                 let serv_file = AsyncFileReader::new(file_path)?;
                 let file_siz = serv_file.file_size;
                 let encryption = !sc.is_present("no_encryption");
-                let approval_strat = if encryption {
-                    ClientApprovalStrategy::Interactive
-                } else {
-                    ClientApprovalStrategy::ApproveAll
-                };
                 let fsrv = FileSrvBuilder::new(serv_file, file_siz)
                     .set_udp_port(42444)
                     .set_stayalive(sc.is_present("stayalive"))
-                    .set_encryption(encryption)
-                    .set_approval_strategy(approval_strat)
+                    .set_encryption(encryption, ClientApprovalStrategy::Interactive)
                     .build()
                     .await?;
                 fsrv.serve().await?;
@@ -169,8 +161,7 @@ mod test {
     fn encrypted_transfer() {
         task::block_on(async {
             let fsrv = FileSrvBuilder::new(TEST_DATA, TEST_DATA.len() as u64)
-                .set_encryption(true)
-                .set_approval_strategy(ClientApprovalStrategy::ApproveAll)
+                .set_encryption(true, ClientApprovalStrategy::ApproveAll)
                 .build()
                 .await
                 .unwrap();
@@ -204,8 +195,7 @@ mod test {
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
         let file_siz = test_file.file_size;
         let fsrv = FileSrvBuilder::new(test_file, file_siz)
-            .set_encryption(encryption)
-            .set_approval_strategy(ClientApprovalStrategy::ApproveAll)
+            .set_encryption(encryption, ClientApprovalStrategy::ApproveAll)
             .build()
             .await
             .unwrap();
@@ -275,8 +265,7 @@ mod test {
             let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
             let file_siz = test_file.file_size;
             let fsrv = FileSrvBuilder::new(test_file, file_siz)
-                .set_encryption(true)
-                .set_approval_strategy(ClientApprovalStrategy::ApproveAll)
+                .set_encryption(encryption, ClientApprovalStrategy::ApproveAll)
                 .build()
                 .await
                 .unwrap();

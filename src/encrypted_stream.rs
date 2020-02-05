@@ -3,16 +3,26 @@ use crate::{
     server::ClientApprovalStrategy,
     LOG,
 };
-use anyhow::{anyhow, Error};
+use anyhow::anyhow;
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use serde::{Deserialize, Serialize};
-use std::cmp::min;
-use std::io::{Cursor, Write};
-use std::{io, pin::Pin, task::Poll};
+use std::{
+    cmp::min,
+    io,
+    io::{Cursor, Write},
+    pin::Pin,
+    task::Poll,
+};
+use thiserror::Error as DError;
 use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
 
-pub struct EncryptedStreamStarter<'a, S: AsyncWrite + AsyncRead> {
+pub struct ServerEncryptedStreamStarter<'a, S: AsyncWrite + AsyncRead> {
+    underlying: Pin<&'a mut S>,
+    secret: EphemeralSecret,
+}
+
+pub struct ClientEncryptedStreamStarter<'a, S: AsyncWrite + AsyncRead> {
     underlying: Pin<&'a mut S>,
     secret: EphemeralSecret,
 }
@@ -22,12 +32,60 @@ struct Handshake {
     pkey: [u8; 32],
 }
 
-impl<'a, S> EncryptedStreamStarter<'a, S>
+impl<'a, S> ClientEncryptedStreamStarter<'a, S>
 where
     S: AsyncWrite + AsyncRead + Unpin,
 {
     pub fn new(underlying_stream: &'a mut S, secret: EphemeralSecret) -> Self {
-        EncryptedStreamStarter {
+        ClientEncryptedStreamStarter {
+            underlying: Pin::new(underlying_stream),
+            secret,
+        }
+    }
+
+    /// Performs DH key exchange with the other side of the stream. Returns a new version
+    /// of the stream that can be read/write from, transparently encrypting/decrypting the
+    /// data.
+    pub async fn key_exchange(mut self) -> Result<EncryptedStream<'a, S>, EncStreamErr> {
+        let pubkey = PublicKey::from(&self.secret);
+        let outgoing_hs = Handshake {
+            pkey: *pubkey.as_bytes(),
+        };
+        // Exchange public keys, first send ours
+        let send_hs = bincode::serialize(&outgoing_hs)?;
+        self.underlying.write_all(send_hs.as_slice()).await?;
+
+        // Read incoming pubkey
+        let read_size = bincode::serialized_size(&outgoing_hs)?;
+        let mut buff = vec![0; read_size as usize];
+        self.underlying.read_exact(&mut buff).await?;
+        let read_hs: Handshake = bincode::deserialize_from(buff.as_slice())?;
+
+        let their_pubkey: PublicKey = read_hs.pkey.into();
+
+        // Client reads the accepted/rejected byte
+        let mut buff = vec![0; 1];
+        self.underlying.read_exact(&mut buff).await?;
+        // Give up if we were rejected
+        if buff[0] != 1 {
+            return Err(EncStreamErr::ClientNotAccepted);
+        }
+
+        // Compute shared secret
+        let shared_secret = self.secret.diffie_hellman(&their_pubkey);
+
+        // TODO: Agree on nonce sequence here?
+
+        EncryptedStream::new(self.underlying, shared_secret)
+    }
+}
+
+impl<'a, S> ServerEncryptedStreamStarter<'a, S>
+where
+    S: AsyncWrite + AsyncRead + Unpin,
+{
+    pub fn new(underlying_stream: &'a mut S, secret: EphemeralSecret) -> Self {
+        ServerEncryptedStreamStarter {
             underlying: Pin::new(underlying_stream),
             secret,
         }
@@ -42,7 +100,7 @@ where
         //   they want to download from the server. Fix with builder or something.
         //   Also make this a ClientApprover
         approval_strat: ClientApprovalStrategy,
-    ) -> Result<EncryptedStream<'a, S>, Error> {
+    ) -> Result<EncryptedStream<'a, S>, EncStreamErr> {
         let pubkey = PublicKey::from(&self.secret);
         let outgoing_hs = Handshake {
             pkey: *pubkey.as_bytes(),
@@ -60,14 +118,21 @@ where
         let their_pubkey: PublicKey = read_hs.pkey.into();
 
         match approval_strat {
-            ClientApprovalStrategy::ApproveAll => (),
+            #[cfg(test)]
+            ClientApprovalStrategy::ApproveAll => {
+                // Send approval byte
+                self.underlying.write_all(&[1]).await?;
+            }
             ClientApprovalStrategy::Interactive => {
-                let approved = (&*CONSOLE_APPROVER)
-                    .submit(their_pubkey.as_bytes())
-                    .await?;
+                let approved = (&*CONSOLE_APPROVER).submit(their_pubkey.as_bytes()).await?;
+                // Server sends signal to client if it is not approved for graceful hangup
+                let approval_byte = if approved { 1 } else { 0 };
+                self.underlying.write_all(&[approval_byte]).await?;
+
                 if !approved {
-                    // TODO: Make a real thing, and handle on connection accept side to not die.
-                    return Err(anyhow!("Client not approved"))
+                    // TODO: Handle in client to not download 0 size file. Fix "Client Downloading!"
+                    //  message
+                    return Err(EncStreamErr::ClientNotAccepted);
                 }
             }
         };
@@ -92,7 +157,7 @@ impl<'a, S> EncryptedStream<'a, S>
 where
     S: AsyncWrite + AsyncRead,
 {
-    fn new(underlying: Pin<&'a mut S>, shared_secret: SharedSecret) -> Result<Self, Error> {
+    fn new(underlying: Pin<&'a mut S>, shared_secret: SharedSecret) -> Result<Self, EncStreamErr> {
         let unbound_k = UnboundKey::new(&CHACHA20_POLY1305, shared_secret.as_bytes())
             .map_err(|_| anyhow!("Couldn't bind key"))?;
         // key used to encrypt data
@@ -261,4 +326,25 @@ where
 
         total_written
     }
+}
+
+#[derive(Debug, DError)]
+pub enum EncStreamErr {
+    #[error("Client rejected")]
+    ClientNotAccepted,
+    #[error("Bincode serialization error")]
+    BincodeErr {
+        #[from]
+        source: Box<bincode::ErrorKind>,
+    },
+    #[error("I/O error")]
+    IOErr {
+        #[from]
+        source: std::io::Error,
+    },
+    #[error("Other error")]
+    Other {
+        #[from]
+        source: anyhow::Error,
+    },
 }

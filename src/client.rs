@@ -1,6 +1,6 @@
 use crate::{
-    encrypted_stream::EncryptedStreamStarter, filewriter::AsyncFileWriter, models::HandshakeReply,
-    server::ClientApprovalStrategy, BROADCAST_ADDR, LOG,
+    encrypted_stream::ClientEncryptedStreamStarter, filewriter::AsyncFileWriter,
+    models::HandshakeReply, BROADCAST_ADDR, LOG,
 };
 use anyhow::{anyhow, Error};
 use async_std::{
@@ -9,13 +9,15 @@ use async_std::{
     prelude::FutureExt,
 };
 use bincode::deserialize;
-use futures::{select, AsyncWrite, FutureExt as OFutureExt};
+use derive_more::Constructor;
+use futures::{select, AsyncRead, AsyncWrite, FutureExt as OFutureExt};
 use indicatif::ProgressBar;
 use rand::rngs::OsRng;
 use std::{
     fs::OpenOptions,
     net::SocketAddr,
     path::PathBuf,
+    pin::Pin,
     sync::{atomic::AtomicUsize, atomic::Ordering, Arc},
     time::Duration,
 };
@@ -81,27 +83,25 @@ impl DownloadClient {
     /// Tell the client to download the server's data to the provided location on disk. If the
     /// location is a directory, the file's name will be determined by the server it's downloaded
     /// from. This consumes the client.
-    pub async fn download_to_file(self, path: PathBuf) -> Result<(), Error> {
+    pub async fn download_to_file(mut self, path: PathBuf) -> Result<(), Error> {
+        // TODO: Allow override / get filename from server
         let path = if path.is_dir() {
             path.join(&self.server_info.name)
         } else {
             path
         };
 
-        //        if path.exists() {
-        //            // TODO: Allow override
-        //            return Err(anyhow!("Refusing to overwrite existing file!"));
-        //        }
-
         let path = path.as_path();
-        info!(LOG, "Downloading to {:?}", path.as_os_str());
+        info!(LOG, "Will download to {:?}", path.as_os_str());
         let data_len = self.server_info.data_len;
+
+        // Do encryption handshake first
+        let stream = self.do_handshake().await?;
 
         let mut as_fwriter = AsyncFileWriter::new(path)?;
         let bytes_written_ref = as_fwriter.bytes_writen.clone();
         let mut progress_fut = progress_counter(bytes_written_ref, data_len).boxed().fuse();
-        let mut download_fut = self
-            .drain_downloaded_to_stream(&mut as_fwriter)
+        let mut download_fut = Self::drain_downloaded_to_stream(&mut as_fwriter, stream)
             .boxed()
             .fuse();
 
@@ -128,33 +128,39 @@ impl DownloadClient {
 
     /// downloads server data to a vec
     #[cfg(test)]
-    pub async fn download_to_vec(self) -> Result<Vec<u8>, Error> {
+    pub async fn download_to_vec(mut self) -> Result<Vec<u8>, Error> {
         let mut download = Vec::with_capacity(2056);
         let data_len = self.server_info.data_len as usize;
-        self.drain_downloaded_to_stream(&mut download).await?;
+        let stream = self.do_handshake().await?;
+        Self::drain_downloaded_to_stream(&mut download, stream).await?;
         // Truncate any extra padding that may have been read
         download.split_off(data_len);
         Ok(download)
     }
 
-    async fn drain_downloaded_to_stream<T>(mut self, mut download: &mut T) -> Result<u64, Error>
-    where
-        T: AsyncWrite + Unpin,
-    {
+    async fn do_handshake(&mut self) -> Result<Pin<Box<dyn AsyncRead + Send + '_>>, Error> {
         if self.server_info.encrypted {
             let mut rng = OsRng::new().unwrap();
             let secret = EphemeralSecret::new(&mut rng);
-            let enc_stream = EncryptedStreamStarter::new(&mut self.stream, secret);
+            let enc_stream = ClientEncryptedStreamStarter::new(&mut self.stream, secret);
             info!(LOG, "Client encrypytion handshaking");
-            let enc_stream = enc_stream
-                .key_exchange(ClientApprovalStrategy::ApproveAll)
-                .await?;
-
-            futures::io::copy(enc_stream, &mut download).await
+            let enc_stream = enc_stream.key_exchange().await?;
+            Ok(Box::pin(enc_stream))
         } else {
-            futures::io::copy(self.stream, &mut download).await
+            Ok(Box::pin(&mut self.stream))
         }
-        .map_err(Into::into)
+    }
+
+    async fn drain_downloaded_to_stream<T>(
+        mut download: &mut T,
+        stream: impl AsyncRead + Send,
+    ) -> Result<u64, Error>
+    where
+        T: AsyncWrite + Unpin,
+    {
+        futures::io::copy(stream, &mut download)
+            .await
+            .map_err(Into::into)
     }
 }
 
@@ -168,7 +174,7 @@ async fn progress_counter(progress: Arc<AtomicUsize>, total_size: u64) {
     }
 }
 
-#[derive(new, Debug)]
+#[derive(Constructor, Debug)]
 /// Identifying information of a server discovered on the network
 pub struct ServerInfo {
     name: String,
