@@ -1,4 +1,4 @@
-#![feature(async_await, test)]
+#![feature(async_await, test, async_closure)]
 
 #[macro_use]
 extern crate clap;
