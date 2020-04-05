@@ -57,9 +57,9 @@ lazy_static! {
     static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)) };
 }
 
-fn main() -> Result<(), Error> {
-    task::block_on(async {
-        let matches = clap_app!(hubtain =>
+#[async_std::main]
+async fn main() -> Result<(), Error> {
+    let matches = clap_app!(hubtain =>
         (version: "0.1")
         (author: "Spencer Judge")
         (about: "Simple local file transfer server and client")
@@ -76,12 +76,12 @@ fn main() -> Result<(), Error> {
                          directory, named by the server it's downloaded from.")
         )
     )
-            .setting(AppSettings::SubcommandRequiredElseHelp)
-            .get_matches();
+    .setting(AppSettings::SubcommandRequiredElseHelp)
+    .get_matches();
 
-        // Gotta have that sweet banner
-        eprintln!(
-            r#"
+    // Gotta have that sweet banner
+    eprintln!(
+        r#"
      _           _     _        _
     | |__  _   _| |__ | |_ __ _(_)_ __
     | '_ \| | | | '_ \| __/ _` | | '_ \
@@ -91,40 +91,39 @@ fn main() -> Result<(), Error> {
        local file transfers made {}
 
     "#,
-            "easy".green()
-        );
+        "easy".green()
+    );
 
-        match matches.subcommand() {
-            ("srv", Some(sc)) => {
-                let file_path = sc.value_of("FILE").unwrap();
-                info!(LOG, "Serving file {}", &file_path);
-                let serv_file = AsyncFileReader::new(file_path)?;
-                let file_siz = serv_file.file_size;
-                let encryption = !sc.is_present("no_encryption");
-                let fsrv = FileSrvBuilder::new(serv_file, file_siz)
-                    .set_udp_port(42444)
-                    .set_stayalive(sc.is_present("stayalive"))
-                    .set_encryption(encryption, ClientApprovalStrategy::Interactive)
-                    .build()
-                    .await?;
-                fsrv.serve().await?;
-            }
-            ("fetch", Some(sc)) => {
-                // TODO: Interactive server selector
-                let client = DownloadClient::connect(42444, |_| true).await?;
-                let file_path = sc
-                    .value_of("FILE")
-                    .map(Into::into)
-                    .unwrap_or_else(|| PathBuf::from("."));
-                client.download_to_file(file_path).await?;
-                info!(LOG, "Download complete!");
-            }
-            _ => return Err(anyhow!("Unmatched subcommand")),
+    match matches.subcommand() {
+        ("srv", Some(sc)) => {
+            let file_path = sc.value_of("FILE").unwrap();
+            info!(LOG, "Serving file {}", &file_path);
+            let serv_file = AsyncFileReader::new(file_path)?;
+            let file_siz = serv_file.file_size;
+            let encryption = !sc.is_present("no_encryption");
+            let fsrv = FileSrvBuilder::new(serv_file, file_siz)
+                .set_udp_port(42444)
+                .set_stayalive(sc.is_present("stayalive"))
+                .set_encryption(encryption, ClientApprovalStrategy::Interactive)
+                .build()
+                .await?;
+            fsrv.serve().await?;
         }
-        // Wait a beat to finish printing any async logging
-        std::thread::sleep(Duration::from_millis(100));
-        Ok(())
-    })
+        ("fetch", Some(sc)) => {
+            // TODO: Interactive server selector
+            let client = DownloadClient::connect(42444, |_| true).await?;
+            let file_path = sc
+                .value_of("FILE")
+                .map(Into::into)
+                .unwrap_or_else(|| PathBuf::from("."));
+            client.download_to_file(file_path).await?;
+            info!(LOG, "Download complete!");
+        }
+        _ => return Err(anyhow!("Unmatched subcommand")),
+    }
+    // Wait a beat to finish printing any async logging
+    std::thread::sleep(Duration::from_millis(100));
+    Ok(())
 }
 
 #[cfg(test)]
