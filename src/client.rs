@@ -140,8 +140,7 @@ impl DownloadClient {
 
     async fn do_handshake(&mut self) -> Result<Pin<Box<dyn AsyncRead + Send + '_>>, Error> {
         if self.server_info.encrypted {
-            let mut rng = OsRng::new().unwrap();
-            let secret = EphemeralSecret::new(&mut rng);
+            let secret = EphemeralSecret::new(&mut OsRng);
             let enc_stream = ClientEncryptedStreamStarter::new(&mut self.stream, secret);
             info!(LOG, "Client encrypytion handshaking");
             let enc_stream = enc_stream.key_exchange().await?;

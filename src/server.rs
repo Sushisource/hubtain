@@ -100,8 +100,7 @@ where
                 match enctype {
                     EncryptionType::Ephemeral => {
                         info!(LOG, "Server handshaking");
-                        let mut rng = OsRng::new().unwrap();
-                        let secret = EphemeralSecret::new(&mut rng);
+                        let secret = EphemeralSecret::new(&mut OsRng);
                         let enc_stream = ServerEncryptedStreamStarter::new(&mut stream, secret);
                         let mut encrypted_stream = match enc_stream.key_exchange(client_strat).await
                         {
