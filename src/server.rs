@@ -1,11 +1,18 @@
-use crate::{mnemonic::random_word, models::HandshakeReply, LOG};
-use bincode::serialize;
-use failure::Error;
-use futures::io::{AsyncRead, AsyncReadExt};
-use runtime::{
-    net::{TcpListener, UdpSocket},
-    spawn,
+use crate::{
+    encrypted_stream::{EncStreamErr, ServerEncryptedStreamStarter},
+    mnemonic::random_word,
+    models::HandshakeReply,
+    LOG,
 };
+use anyhow::Error;
+use async_std::{
+    net::{TcpListener, UdpSocket},
+    task::{spawn, JoinHandle},
+};
+use bincode::serialize;
+use futures::io::AsyncRead;
+use rand::rngs::OsRng;
+use x25519_dalek::EphemeralSecret;
 
 /// File server for hubtain's srv mode
 pub struct FileSrv<T>
@@ -14,50 +21,36 @@ where
 {
     stay_alive: bool,
     udp_sock: UdpSocket,
-    tcp_sock: Option<TcpListener>,
-    data: Option<T>,
+    tcp_sock: TcpListener,
+    data: T,
     data_length: u64,
     name: String,
+    encrypted: bool,
+    client_approval_strategy: ClientApprovalStrategy,
 }
 
 impl<T> FileSrv<T>
 where
     T: 'static + AsyncRead + Send + Unpin + Clone,
 {
-    /// Create a new `FileSrv` given UDP and TCP sockets to listen on and some data source to serve
-    /// If `stay_alive` is false, the server will shut down after serving the data to the first
-    /// client who downloads it.
-    pub fn new(
-        udp_sock: UdpSocket,
-        tcp_sock: TcpListener,
-        data: T,
-        data_length: u64,
-        stay_alive: bool,
-    ) -> Self {
-        let name = random_word();
-        FileSrv {
-            stay_alive,
-            udp_sock,
-            tcp_sock: Some(tcp_sock),
-            data: Some(data),
-            data_length,
-            name: name.to_string(),
-        }
-    }
-
     /// Begin listening for connections and serving data.
-    pub async fn serve(mut self) -> Result<(), Error> {
+    pub async fn serve(self) -> Result<(), Error> {
         info!(LOG, "Server name: {}", self.name);
-        // TODO: no unwrap
-        let tcp_port = self.tcp_sock.as_ref().unwrap().local_addr()?.port();
+        let tcp_port = self.tcp_sock.local_addr()?.port();
 
         self.udp_sock.set_broadcast(true)?;
         info!(LOG, "UDP Listening on {}", self.udp_sock.local_addr()?);
 
         let data_handle = spawn(FileSrv::data_srv(
-            self.tcp_sock.take().unwrap(),
-            self.data.take().unwrap(),
+            self.tcp_sock,
+            self.data,
             self.stay_alive,
+            if self.encrypted {
+                EncryptionType::Ephemeral
+            } else {
+                EncryptionType::None
+            },
+            self.client_approval_strategy,
         ));
 
         // Wait for broadcast from peer
@@ -70,6 +63,7 @@ where
                 server_name: self.name.clone(),
                 tcp_port,
                 data_length: self.data_length,
+                encrypted: self.encrypted,
             })?;
             self.udp_sock.send_to(&initial_info, &peer).await?;
             if !self.stay_alive {
@@ -81,28 +75,69 @@ where
     }
 
     /// Return the UDP port the server is bound to
+    #[cfg(test)]
     pub fn udp_port(&self) -> Result<u16, Error> {
         Ok(self.udp_sock.local_addr()?.port())
     }
 
     /// The data srv runs independently of the main srv loop, and does the job of actually
     /// transferring data to clients.
-    async fn data_srv(mut tcp_sock: TcpListener, data: T, stay_alive: bool) -> Result<(), Error> {
+    async fn data_srv(
+        tcp_sock: TcpListener,
+        data: T,
+        stay_alive: bool,
+        enctype: EncryptionType,
+        client_strat: ClientApprovalStrategy,
+    ) -> Result<(), Error> {
         info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
         loop {
             let (mut stream, addr) = tcp_sock.accept().await?;
             info!(LOG, "Accepted download connection from {:?}", &addr);
             // TODO: Unneeded clone?
-            let mut data_src = data.clone();
-            let _ = spawn(async move {
-                info!(LOG, "Client downloading!");
-                data_src.copy_into(&mut stream).await
+            let data_src = data.clone();
+            let enctype = enctype.clone();
+            let h: JoinHandle<Result<(), Error>> = spawn(async move {
+                match enctype {
+                    EncryptionType::Ephemeral => {
+                        info!(LOG, "Server handshaking");
+                        let secret = EphemeralSecret::new(&mut OsRng);
+                        let enc_stream = ServerEncryptedStreamStarter::new(&mut stream, secret);
+                        let mut encrypted_stream = match enc_stream.key_exchange(client_strat).await
+                        {
+                            Ok(es) => es,
+                            Err(EncStreamErr::ClientNotAccepted) => return Ok(()),
+                            e => e?,
+                        };
+                        info!(LOG, "Client downloading!");
+                        futures::io::copy(data_src, &mut encrypted_stream).await?;
+                    }
+                    EncryptionType::None => {
+                        info!(LOG, "Client downloading!");
+                        futures::io::copy(data_src, &mut stream).await?;
+                    }
+                };
+                Ok(())
             });
             if !stay_alive {
+                // TODO: Does this screw up multi client mode?
+                h.await?;
                 return Ok(());
             }
         }
     }
+}
+
+#[derive(Clone)]
+enum EncryptionType {
+    None,
+    Ephemeral,
+}
+
+#[derive(Clone, Copy)]
+pub enum ClientApprovalStrategy {
+    Interactive,
+    #[cfg(test)]
+    ApproveAll,
 }
 
 pub struct FileSrvBuilder<T>
@@ -113,7 +148,9 @@ where
     data_len: u64,
     udp_port: u16,
     stay_alive: bool,
+    encryption: bool,
     listen_addr: String,
+    client_approval_strategy: ClientApprovalStrategy,
 }
 
 #[cfg(not(test))]
@@ -126,11 +163,13 @@ const DEFAULT_TCP_LISTEN_ADDR: &str = "127.0.0.1";
 fn udp_srv_bind_addr(port_num: u16) -> String {
     format!("0.0.0.0:{}", port_num)
 }
+
 #[cfg(target_family = "unix")]
 #[cfg(not(test))]
 fn udp_srv_bind_addr(port_num: u16) -> String {
     format!("192.168.0.255:{}", port_num)
 }
+
 #[cfg(test)]
 fn udp_srv_bind_addr(port_num: u16) -> String {
     format!("127.0.0.1:{}", port_num)
@@ -146,7 +185,9 @@ where
             data_len,
             udp_port: 0,
             stay_alive: false,
+            encryption: false,
             listen_addr: DEFAULT_TCP_LISTEN_ADDR.to_string(),
+            client_approval_strategy: ClientApprovalStrategy::Interactive,
         }
     }
 
@@ -160,15 +201,29 @@ where
         self
     }
 
-    pub fn build(self) -> Result<FileSrv<T>, Error> {
-        let tcp_sock = TcpListener::bind(format!("{}:0", &self.listen_addr))?;
-        let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port))?;
-        Ok(FileSrv::new(
+    pub fn set_encryption(
+        mut self,
+        encryption: bool,
+        approval_strategy: ClientApprovalStrategy,
+    ) -> Self {
+        self.encryption = encryption;
+        self.client_approval_strategy = approval_strategy;
+        self
+    }
+
+    pub async fn build(self) -> Result<FileSrv<T>, Error> {
+        let tcp_sock = TcpListener::bind(format!("{}:0", &self.listen_addr)).await?;
+        let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port)).await?;
+        let name = random_word();
+        Ok(FileSrv {
+            stay_alive: self.stay_alive,
             udp_sock,
             tcp_sock,
-            self.data,
-            self.data_len,
-            self.stay_alive,
-        ))
+            data: self.data,
+            data_length: self.data_len,
+            name: name.to_string(),
+            encrypted: self.encryption,
+            client_approval_strategy: self.client_approval_strategy,
+        })
     }
 }

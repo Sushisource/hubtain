@@ -5,3 +5,6 @@
 res.txt
 download
 testdata/large.bin
+/.idea/*
+tags
+dump.log
