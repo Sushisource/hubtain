@@ -130,8 +130,6 @@ where
                 self.underlying.write_all(&[approval_byte]).await?;
 
                 if !approved {
-                    // TODO: Handle in client to not download 0 size file. Fix "Client Downloading!"
-                    //  message
                     return Err(EncStreamErr::ClientNotAccepted);
                 }
             }
@@ -330,7 +328,7 @@ where
 
 #[derive(Debug, DError)]
 pub enum EncStreamErr {
-    #[error("Client rejected")]
+    #[error("Client rejected by server")]
     ClientNotAccepted,
     #[error("Bincode serialization error")]
     BincodeErr {

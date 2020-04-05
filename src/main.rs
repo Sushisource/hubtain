@@ -265,7 +265,7 @@ mod test {
             let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
             let file_siz = test_file.file_size;
             let fsrv = FileSrvBuilder::new(test_file, file_siz)
-                .set_encryption(encryption, ClientApprovalStrategy::ApproveAll)
+                .set_encryption(true, ClientApprovalStrategy::ApproveAll)
                 .build()
                 .await
                 .unwrap();
@@ -286,13 +286,13 @@ mod test {
             let start = Instant::now();
             dbg!("Loading file");
             let mut test_dat = vec![];
-            File::open("testdata/large.bin")
+            File::open("testdata/tmpdownload")
                 .unwrap()
                 .read_to_end(&mut test_dat)
                 .unwrap();
             dbg!("Done loading file after {:?}", start.elapsed());
-            // TODO: FIX
-            //        assert_eq!(content, test_dat);
+            let content = include_bytes!("../testdata/large.bin");
+            assert_eq!(content.as_ref(), test_dat.as_slice());
         })
     }
 }
