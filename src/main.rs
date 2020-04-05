@@ -6,6 +6,8 @@ extern crate clap;
 extern crate slog;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate derive_more;
 
 mod broadcast_addr_picker;
 mod client;

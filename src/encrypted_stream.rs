@@ -5,7 +5,11 @@ use crate::{
 };
 use anyhow::anyhow;
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
+use ring::aead::{
+    Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, CHACHA20_POLY1305,
+    NONCE_LEN,
+};
+use ring::error::Unspecified;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::min,
@@ -46,7 +50,7 @@ where
     /// Performs DH key exchange with the other side of the stream. Returns a new version
     /// of the stream that can be read/write from, transparently encrypting/decrypting the
     /// data.
-    pub async fn key_exchange(mut self) -> Result<EncryptedStream<'a, S>, EncStreamErr> {
+    pub async fn key_exchange(mut self) -> Result<EncryptedReadStream<'a, S>, EncStreamErr> {
         let pubkey = PublicKey::from(&self.secret);
         let outgoing_hs = Handshake {
             pkey: *pubkey.as_bytes(),
@@ -73,10 +77,7 @@ where
 
         // Compute shared secret
         let shared_secret = self.secret.diffie_hellman(&their_pubkey);
-
-        // TODO: Agree on nonce sequence here?
-
-        EncryptedStream::new(self.underlying, shared_secret)
+        EncryptedReadStream::new(self.underlying, shared_secret)
     }
 }
 
@@ -96,11 +97,8 @@ where
     /// data.
     pub async fn key_exchange(
         mut self,
-        // TODO: Param doesn't make sense for a client using an encrypted stream, since obviously
-        //   they want to download from the server. Fix with builder or something.
-        //   Also make this a ClientApprover
         approval_strat: ClientApprovalStrategy,
-    ) -> Result<EncryptedStream<'a, S>, EncStreamErr> {
+    ) -> Result<EncryptedWriteStream<'a, S>, EncStreamErr> {
         let pubkey = PublicKey::from(&self.secret);
         let outgoing_hs = Handshake {
             pkey: *pubkey.as_bytes(),
@@ -137,36 +135,7 @@ where
 
         // Compute shared secret
         let shared_secret = self.secret.diffie_hellman(&their_pubkey);
-
-        // TODO: Agree on nonce sequence here?
-
-        EncryptedStream::new(self.underlying, shared_secret)
-    }
-}
-
-pub struct EncryptedStream<'a, S: AsyncWrite + AsyncRead> {
-    underlying: Pin<&'a mut S>,
-    key: LessSafeKey,
-    read_remainder: Vec<u8>,
-    unwritten: Vec<Vec<u8>>,
-}
-
-impl<'a, S> EncryptedStream<'a, S>
-where
-    S: AsyncWrite + AsyncRead,
-{
-    fn new(underlying: Pin<&'a mut S>, shared_secret: SharedSecret) -> Result<Self, EncStreamErr> {
-        let unbound_k = UnboundKey::new(&CHACHA20_POLY1305, shared_secret.as_bytes())
-            .map_err(|_| anyhow!("Couldn't bind key"))?;
-        // key used to encrypt data
-        let key = LessSafeKey::new(unbound_k);
-
-        Ok(Self {
-            underlying,
-            key,
-            read_remainder: vec![],
-            unwritten: vec![],
-        })
+        EncryptedWriteStream::new(self.underlying, shared_secret)
     }
 }
 
@@ -177,24 +146,41 @@ struct EncryptedPacket {
     data: Vec<u8>,
 }
 
-impl<'a, S> AsyncWrite for EncryptedStream<'a, S>
+pub struct EncryptedWriteStream<'a, S: AsyncWrite> {
+    underlying: Pin<&'a mut S>,
+    key: SealingKey<SharedSecretNonceSeq>,
+}
+
+impl<'a, S> EncryptedWriteStream<'a, S>
 where
-    S: AsyncWrite + AsyncRead,
+    S: AsyncWrite,
+{
+    fn new(underlying: Pin<&'a mut S>, shared_secret: SharedSecret) -> Result<Self, EncStreamErr> {
+        let unbound_k = UnboundKey::new(&CHACHA20_POLY1305, shared_secret.as_bytes())
+            .map_err(|_| anyhow!("Couldn't bind key"))?;
+        let derived_nonce_seq = SharedSecretNonceSeq::new(shared_secret);
+        // key used to encrypt data
+        let key = SealingKey::new(unbound_k, derived_nonce_seq);
+
+        Ok(Self { underlying, key })
+    }
+}
+
+impl<'a, S> AsyncWrite for EncryptedWriteStream<'a, S>
+where
+    S: AsyncWrite,
 {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        // TODO: have both sides agree on nonce sequence somehow?
-        let nonce = Nonce::assume_unique_for_key([0; 12]);
-
         let siz = min(buf.len(), CHUNK_SIZE);
         let mut encrypt_me = vec![0; siz];
         encrypt_me.copy_from_slice(&buf[0..siz]);
         let bufsiz = encrypt_me.len();
         self.key
-            .seal_in_place_append_tag(nonce, Aad::empty(), &mut encrypt_me)
+            .seal_in_place_append_tag(Aad::empty(), &mut encrypt_me)
             .unwrap();
 
         let packet = EncryptedPacket { data: encrypt_me };
@@ -217,7 +203,34 @@ where
     }
 }
 
-impl<'a, S> AsyncRead for EncryptedStream<'a, S>
+pub struct EncryptedReadStream<'a, S: AsyncRead> {
+    underlying: Pin<&'a mut S>,
+    key: OpeningKey<SharedSecretNonceSeq>,
+    read_remainder: Vec<u8>,
+    unwritten: Vec<Vec<u8>>,
+}
+
+impl<'a, S> EncryptedReadStream<'a, S>
+where
+    S: AsyncRead,
+{
+    fn new(underlying: Pin<&'a mut S>, shared_secret: SharedSecret) -> Result<Self, EncStreamErr> {
+        let unbound_k = UnboundKey::new(&CHACHA20_POLY1305, shared_secret.as_bytes())
+            .map_err(|_| anyhow!("Couldn't bind key"))?;
+        let derived_nonce_seq = SharedSecretNonceSeq::new(shared_secret);
+        // key used to encrypt data
+        let key = OpeningKey::new(unbound_k, derived_nonce_seq);
+
+        Ok(Self {
+            underlying,
+            key,
+            read_remainder: vec![],
+            unwritten: vec![],
+        })
+    }
+}
+
+impl<'a, S> AsyncRead for EncryptedReadStream<'a, S>
 where
     S: AsyncRead + AsyncWrite,
 {
@@ -259,7 +272,7 @@ where
     }
 }
 
-impl<'a, S> EncryptedStream<'a, S>
+impl<'a, S> EncryptedReadStream<'a, S>
 where
     S: AsyncRead + AsyncWrite,
 {
@@ -274,9 +287,6 @@ where
         let mut successfull_buffer_advance = 0;
 
         loop {
-            // TODO: doesn't belong here
-            let nonce = Nonce::assume_unique_for_key([0; 12]);
-
             let deser_res: Result<EncryptedPacket, _> = bincode::deserialize_from(&mut read_cursor);
             let cursor_pos = read_cursor.position();
 
@@ -291,7 +301,7 @@ where
 
                     let just_content = self
                         .key
-                        .open_in_place(nonce, Aad::empty(), &mut decrypt_buff)
+                        .open_in_place(Aad::empty(), &mut decrypt_buff)
                         .unwrap();
                     match Write::write_all(&mut write_cursor, &just_content) {
                         Ok(_) => {
@@ -323,6 +333,19 @@ where
         self.read_remainder = remainder_plus_read.split_off(successfull_buffer_advance as usize);
 
         total_written
+    }
+}
+
+#[derive(Constructor)]
+struct SharedSecretNonceSeq {
+    inner: SharedSecret,
+}
+
+impl NonceSequence for SharedSecretNonceSeq {
+    fn advance(&mut self) -> Result<Nonce, Unspecified> {
+        Ok(Nonce::try_assume_unique_for_key(
+            &self.inner.as_bytes()[..NONCE_LEN],
+        )?)
     }
 }
 
