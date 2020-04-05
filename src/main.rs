@@ -140,57 +140,49 @@ mod test {
 
     static TEST_DATA: &[u8] = b"Hi I'm data";
 
-    #[test]
-    fn basic_transfer() {
-        task::block_on(async {
-            let fsrv = FileSrvBuilder::new(TEST_DATA, TEST_DATA.len() as u64)
-                .build()
-                .await
-                .unwrap();
-            let udp_port = fsrv.udp_port().unwrap();
-            let server_f = spawn(fsrv.serve());
+    #[async_std::test]
+    async fn basic_transfer() {
+        let fsrv = FileSrvBuilder::new(TEST_DATA, TEST_DATA.len() as u64)
+            .build()
+            .await
+            .unwrap();
+        let udp_port = fsrv.udp_port().unwrap();
+        let server_f = spawn(fsrv.serve());
 
-            let client = DownloadClient::connect(udp_port, test_srvr_sel)
-                .await
-                .unwrap();
-            let content = client.download_to_vec().await.unwrap();
-            assert_eq!(content, TEST_DATA);
-            server_f.await.unwrap();
-        })
+        let client = DownloadClient::connect(udp_port, test_srvr_sel)
+            .await
+            .unwrap();
+        let content = client.download_to_vec().await.unwrap();
+        assert_eq!(content, TEST_DATA);
+        server_f.await.unwrap();
     }
 
-    #[test]
-    fn encrypted_transfer() {
-        task::block_on(async {
-            let fsrv = FileSrvBuilder::new(TEST_DATA, TEST_DATA.len() as u64)
-                .set_encryption(true, ClientApprovalStrategy::ApproveAll)
-                .build()
-                .await
-                .unwrap();
-            let udp_port = fsrv.udp_port().unwrap();
-            let server_f = spawn(fsrv.serve());
+    #[async_std::test]
+    async fn encrypted_transfer() {
+        let fsrv = FileSrvBuilder::new(TEST_DATA, TEST_DATA.len() as u64)
+            .set_encryption(true, ClientApprovalStrategy::ApproveAll)
+            .build()
+            .await
+            .unwrap();
+        let udp_port = fsrv.udp_port().unwrap();
+        let server_f = spawn(fsrv.serve());
 
-            let client = DownloadClient::connect(udp_port, test_srvr_sel)
-                .await
-                .unwrap();
-            let content = client.download_to_vec().await.unwrap();
-            server_f.await.unwrap();
-            assert_eq!(content, TEST_DATA);
-        })
+        let client = DownloadClient::connect(udp_port, test_srvr_sel)
+            .await
+            .unwrap();
+        let content = client.download_to_vec().await.unwrap();
+        server_f.await.unwrap();
+        assert_eq!(content, TEST_DATA);
     }
 
-    #[test]
-    fn single_small_file_transfer() {
-        task::block_on(async {
-            file_transfer_test(false).await;
-        })
+    #[async_std::test]
+    async fn single_small_file_transfer() {
+        file_transfer_test(false).await;
     }
 
-    #[test]
-    fn single_small_encrypted_file_transfer() {
-        task::block_on(async {
-            file_transfer_test(true).await;
-        })
+    #[async_std::test]
+    async fn single_small_encrypted_file_transfer() {
+        file_transfer_test(true).await;
     }
 
     async fn file_transfer_test(encryption: bool) {
@@ -225,76 +217,72 @@ mod test {
         server_f.await.unwrap();
     }
 
-    #[test]
-    fn multiple_small_transfer() {
-        task::block_on(async {
-            let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
-            let file_siz = test_file.file_size;
-            let fsrv = FileSrvBuilder::new(test_file, file_siz)
-                .set_stayalive(true)
-                .build()
-                .await
-                .unwrap();
-            let udp_port = fsrv.udp_port().unwrap();
-            let _ = spawn(fsrv.serve());
+    #[async_std::test]
+    async fn multiple_small_transfer() {
+        let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
+        let file_siz = test_file.file_size;
+        let fsrv = FileSrvBuilder::new(test_file, file_siz)
+            .set_stayalive(true)
+            .build()
+            .await
+            .unwrap();
+        let udp_port = fsrv.udp_port().unwrap();
+        let _ = spawn(fsrv.serve());
 
-            let dl_futures = (1..100).map(async move |_| {
-                let client = DownloadClient::connect(udp_port, test_srvr_sel)
-                    .await
-                    .unwrap();
-                client.download_to_vec().await
-            });
-            let contents = futures::future::try_join_all(dl_futures).await.unwrap();
-
-            let mut test_dat = vec![];
-            File::open("testdata/small.txt")
-                .unwrap()
-                .read_to_end(&mut test_dat)
-                .unwrap();
-
-            for content in contents {
-                assert_eq!(content, test_dat);
-            }
-        })
-    }
-
-    #[cfg(feature = "expensive_tests")]
-    #[test]
-    fn large_file_transfer() {
-        task::block_on(async {
-            use std::time::Instant;
-
-            let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
-            let file_siz = test_file.file_size;
-            let fsrv = FileSrvBuilder::new(test_file, file_siz)
-                .set_encryption(true, ClientApprovalStrategy::ApproveAll)
-                .build()
-                .await
-                .unwrap();
-            let udp_port = fsrv.udp_port().unwrap();
-            let _ = spawn(fsrv.serve());
-
+        let dl_futures = (1..100).map(async move |_| {
             let client = DownloadClient::connect(udp_port, test_srvr_sel)
                 .await
                 .unwrap();
-            let start = Instant::now();
-            dbg!("Began transfer");
-            client
-                .download_to_file("testdata/tmpdownload".into())
-                .await
-                .unwrap();
-            dbg!("Finished transfer after {:?}", start.elapsed());
+            client.download_to_vec().await
+        });
+        let contents = futures::future::try_join_all(dl_futures).await.unwrap();
 
-            let start = Instant::now();
-            dbg!("Loading file");
-            let mut test_dat = vec![];
-            File::open("testdata/tmpdownload")
-                .unwrap()
-                .read_to_end(&mut test_dat)
-                .unwrap();
-            dbg!("Done loading file after {:?}", start.elapsed());
-            let content = include_bytes!("../testdata/large.bin");
-            assert_eq!(content.as_ref(), test_dat.as_slice());
-        })
+        let mut test_dat = vec![];
+        File::open("testdata/small.txt")
+            .unwrap()
+            .read_to_end(&mut test_dat)
+            .unwrap();
+
+        for content in contents {
+            assert_eq!(content, test_dat);
+        }
+    }
+
+    #[cfg(feature = "expensive_tests")]
+    #[async_std::test]
+    fn large_file_transfer() {
+        use std::time::Instant;
+
+        let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
+        let file_siz = test_file.file_size;
+        let fsrv = FileSrvBuilder::new(test_file, file_siz)
+            .set_encryption(true, ClientApprovalStrategy::ApproveAll)
+            .build()
+            .await
+            .unwrap();
+        let udp_port = fsrv.udp_port().unwrap();
+        let _ = spawn(fsrv.serve());
+
+        let client = DownloadClient::connect(udp_port, test_srvr_sel)
+            .await
+            .unwrap();
+        let start = Instant::now();
+        dbg!("Began transfer");
+        client
+            .download_to_file("testdata/tmpdownload".into())
+            .await
+            .unwrap();
+        dbg!("Finished transfer after {:?}", start.elapsed());
+
+        let start = Instant::now();
+        dbg!("Loading file");
+        let mut test_dat = vec![];
+        File::open("testdata/tmpdownload")
+            .unwrap()
+            .read_to_end(&mut test_dat)
+            .unwrap();
+        dbg!("Done loading file after {:?}", start.elapsed());
+        let content = include_bytes!("../testdata/large.bin");
+        assert_eq!(content.as_ref(), test_dat.as_slice());
     }
 }

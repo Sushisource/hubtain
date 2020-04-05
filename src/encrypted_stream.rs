@@ -1,3 +1,9 @@
+//! Defines write and read halfs of async streams that can perform encryption.
+//!
+//! Probably doing the encryption/decryption inside the poll() functions is less than ideal
+//! given it may take long enough to count as blocking - but it does make for an easy-to-use
+//! interface and is plenty fast in practice.
+
 use crate::{
     client_approver::{ClientApprover, CONSOLE_APPROVER},
     server::ClientApprovalStrategy,
@@ -33,7 +39,7 @@ pub struct ClientEncryptedStreamStarter<'a, S: AsyncWrite + AsyncRead> {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Handshake {
-    pkey: [u8; 32],
+    pubkey: [u8; 32],
 }
 
 impl<'a, S> ClientEncryptedStreamStarter<'a, S>
@@ -53,7 +59,7 @@ where
     pub async fn key_exchange(mut self) -> Result<EncryptedReadStream<'a, S>, EncStreamErr> {
         let pubkey = PublicKey::from(&self.secret);
         let outgoing_hs = Handshake {
-            pkey: *pubkey.as_bytes(),
+            pubkey: *pubkey.as_bytes(),
         };
         // Exchange public keys, first send ours
         let send_hs = bincode::serialize(&outgoing_hs)?;
@@ -65,7 +71,7 @@ where
         self.underlying.read_exact(&mut buff).await?;
         let read_hs: Handshake = bincode::deserialize_from(buff.as_slice())?;
 
-        let their_pubkey: PublicKey = read_hs.pkey.into();
+        let their_pubkey: PublicKey = read_hs.pubkey.into();
 
         // Client reads the accepted/rejected byte
         let mut buff = vec![0; 1];
@@ -101,7 +107,7 @@ where
     ) -> Result<EncryptedWriteStream<'a, S>, EncStreamErr> {
         let pubkey = PublicKey::from(&self.secret);
         let outgoing_hs = Handshake {
-            pkey: *pubkey.as_bytes(),
+            pubkey: *pubkey.as_bytes(),
         };
         // Exchange public keys, first send ours
         let send_hs = bincode::serialize(&outgoing_hs)?;
@@ -113,7 +119,7 @@ where
         self.underlying.read_exact(&mut buff).await?;
         let read_hs: Handshake = bincode::deserialize_from(buff.as_slice())?;
 
-        let their_pubkey: PublicKey = read_hs.pkey.into();
+        let their_pubkey: PublicKey = read_hs.pubkey.into();
 
         match approval_strat {
             #[cfg(test)]
