@@ -1,4 +1,4 @@
-use failure::Error;
+use anyhow::Error;
 use futures::{io::AsyncWrite, task::Context};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;

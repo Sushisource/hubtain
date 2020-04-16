@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(dead_code))]
 
-use failure::{err_msg, Error};
+use anyhow::{anyhow, Error};
 use std::net::IpAddr;
 
 use get_if_addrs::get_if_addrs;
@@ -35,5 +35,5 @@ fn select_from_ips<T: IntoIterator<Item = IfAddr>>(addrs: T) -> Result<IpAddr, E
             }
         })
         .next()
-        .ok_or_else(|| err_msg("Couldn't select a broadcast address"))
+        .ok_or_else(|| anyhow!("Couldn't select a broadcast address"))
 }
