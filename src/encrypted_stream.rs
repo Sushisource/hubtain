@@ -4,11 +4,7 @@
 //! given it may take long enough to count as blocking - but it does make for an easy-to-use
 //! interface and is plenty fast in practice.
 
-use crate::{
-    client_approver::{ClientApprover, CONSOLE_APPROVER},
-    server::ClientApprovalStrategy,
-    LOG,
-};
+use crate::server::{ClientApprovalStrategy, ClientApprover};
 use anyhow::anyhow;
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use ring::aead::{
@@ -104,6 +100,7 @@ where
     pub async fn key_exchange(
         mut self,
         approval_strat: ClientApprovalStrategy,
+        approver: &dyn ClientApprover,
     ) -> Result<EncryptedWriteStream<'a, S>, EncStreamErr> {
         let pubkey = PublicKey::from(&self.secret);
         let outgoing_hs = Handshake {
@@ -128,7 +125,7 @@ where
                 self.underlying.write_all(&[1]).await?;
             }
             ClientApprovalStrategy::Interactive => {
-                let approved = (&*CONSOLE_APPROVER).submit(their_pubkey.as_bytes()).await?;
+                let approved = approver.submit(their_pubkey.as_bytes()).await?;
                 // Server sends signal to client if it is not approved for graceful hangup
                 let approval_byte = if approved { 1 } else { 0 };
                 self.underlying.write_all(&[approval_byte]).await?;
@@ -247,7 +244,7 @@ where
     ) -> Poll<Result<usize, io::Error>> {
         let mut written_from_unwritten = 0;
         while let Some(unwritten) = self.unwritten.pop() {
-            debug!(LOG, "Writing reserved packet");
+            debug!("Writing reserved packet");
             Write::write_all(&mut buf, &unwritten).expect("Must work");
             written_from_unwritten += unwritten.len();
         }
@@ -301,7 +298,7 @@ where
                     successfull_buffer_advance = cursor_pos;
                     let mut decrypt_buff = packet.data;
                     if decrypt_buff.is_empty() {
-                        debug!(LOG, "Buffer empty, exiting");
+                        debug!("Buffer empty, exiting");
                         break;
                     }
 
@@ -318,7 +315,7 @@ where
                             //   poll reads into helped, but didn't totally eliminate. May simply
                             //   not be able to, as it looks like writing three packets in a row
                             //   is too much, but it only seems to happen at the end.
-                            debug!(LOG, "Couldn't write all decrypted data into buffer: {}", e);
+                            debug!("Couldn't write all decrypted data into buffer: {}", e);
                             self.unwritten.push(just_content.to_vec());
                         }
                     }
@@ -327,7 +324,7 @@ where
                     // When deserialization fails because of unexpected eof, we have a partial
                     // packet, so the goal is to store it in the remainder and exit
                     bincode::ErrorKind::Io(e) => {
-                        debug!(LOG, "Couldn't deserialize whole packet: {}", e);
+                        debug!("Couldn't deserialize whole packet: {}", e);
                         break;
                     }
                     e => panic!(e),

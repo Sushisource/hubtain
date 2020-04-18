@@ -1,8 +1,13 @@
+mod client_approver;
+#[cfg(not(test))]
+mod tui;
+
+pub use client_approver::{ClientApprover, ClientId};
+
 use crate::{
     encrypted_stream::{EncStreamErr, ServerEncryptedStreamStarter},
     mnemonic::random_word,
     models::HandshakeReply,
-    LOG,
 };
 use anyhow::Error;
 use async_std::{
@@ -13,6 +18,13 @@ use bincode::serialize;
 use futures::io::AsyncRead;
 use rand::rngs::OsRng;
 use x25519_dalek::EphemeralSecret;
+
+#[cfg(not(test))]
+use self::tui::ServerTui;
+#[cfg(test)]
+use crate::server::client_approver::ConsoleApprover;
+#[cfg(not(test))]
+use crate::tui::{TermMsg, TuiApprover};
 
 /// File server for hubtain's srv mode
 pub struct FileSrv<T>
@@ -35,11 +47,21 @@ where
 {
     /// Begin listening for connections and serving data.
     pub async fn serve(self) -> Result<(), Error> {
-        info!(LOG, "Server name: {}", self.name);
+        // TODO: Handle this better than compile flags
+        // TODO: Allow for a fallback cli mode for one-client too
+        #[cfg(not(test))]
+        let tx = ServerTui::start();
+
+        info!("Server name: {}", self.name);
         let tcp_port = self.tcp_sock.local_addr()?.port();
 
         self.udp_sock.set_broadcast(true)?;
-        info!(LOG, "UDP Listening on {}", self.udp_sock.local_addr()?);
+        info!("UDP Listening on {}", self.udp_sock.local_addr()?);
+
+        #[cfg(test)]
+        let approver = Box::leak(Box::new(ConsoleApprover::default()));
+        #[cfg(not(test))]
+        let approver = Box::leak(Box::new(TuiApprover::new(tx.clone())));
 
         let data_handle = spawn(FileSrv::data_srv(
             self.tcp_sock,
@@ -51,13 +73,14 @@ where
                 EncryptionType::None
             },
             self.client_approval_strategy,
+            &*approver,
         ));
 
         // Wait for broadcast from peer
         let mut buf = vec![0u8; 100];
         loop {
             let (_, peer) = self.udp_sock.recv_from(&mut buf).await?;
-            info!(LOG, "Client ping from {}", &peer);
+            info!("Client ping from {}", &peer);
             // Reply with name and tcp portnum
             let initial_info = serialize(&HandshakeReply {
                 server_name: self.name.clone(),
@@ -68,10 +91,14 @@ where
             self.udp_sock.send_to(&initial_info, &peer).await?;
             if !self.stay_alive {
                 data_handle.await?;
-                info!(LOG, "Done serving!");
-                return Ok(());
+                info!("Done serving!");
+                break;
             }
         }
+
+        #[cfg(not(test))]
+        tx.send(TermMsg::Quit)?;
+        Ok(())
     }
 
     /// Return the UDP port the server is bound to
@@ -88,31 +115,31 @@ where
         stay_alive: bool,
         enctype: EncryptionType,
         client_strat: ClientApprovalStrategy,
+        approver: &'static dyn ClientApprover,
     ) -> Result<(), Error> {
-        info!(LOG, "TCP listening on {}", tcp_sock.local_addr()?);
+        info!("TCP listening on {}", tcp_sock.local_addr()?);
         loop {
             let (mut stream, addr) = tcp_sock.accept().await?;
-            info!(LOG, "Accepted download connection from {:?}", &addr);
-            // TODO: Unneeded clone?
+            info!("Accepted download connection from {:?}", &addr);
             let data_src = data.clone();
             let enctype = enctype.clone();
             let h: JoinHandle<Result<(), Error>> = spawn(async move {
                 match enctype {
                     EncryptionType::Ephemeral => {
-                        info!(LOG, "Server handshaking");
+                        info!("Server handshaking");
                         let secret = EphemeralSecret::new(&mut OsRng);
                         let enc_stream = ServerEncryptedStreamStarter::new(&mut stream, secret);
-                        let mut encrypted_stream = match enc_stream.key_exchange(client_strat).await
-                        {
-                            Ok(es) => es,
-                            Err(EncStreamErr::ClientNotAccepted) => return Ok(()),
-                            e => e?,
-                        };
-                        info!(LOG, "Client downloading!");
+                        let mut encrypted_stream =
+                            match enc_stream.key_exchange(client_strat, approver).await {
+                                Ok(es) => es,
+                                Err(EncStreamErr::ClientNotAccepted) => return Ok(()),
+                                e => e?,
+                            };
+                        info!("Client downloading!");
                         futures::io::copy(data_src, &mut encrypted_stream).await?;
                     }
                     EncryptionType::None => {
-                        info!(LOG, "Client downloading!");
+                        info!("Client downloading!");
                         futures::io::copy(data_src, &mut stream).await?;
                     }
                 };

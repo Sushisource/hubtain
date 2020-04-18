@@ -10,7 +10,7 @@ lazy_static! {
 }
 
 #[async_trait]
-pub trait ClientApprover {
+pub trait ClientApprover: Sync + Send {
     /// Submit a client for approval. Resolves when the client is approved or rejected, true for
     /// approved.
     async fn submit(&self, client_id: &ClientId) -> Result<bool, Error>;

@@ -3,21 +3,22 @@
 #[macro_use]
 extern crate clap;
 #[macro_use]
-extern crate slog;
-#[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate derive_more;
+#[macro_use]
+extern crate log;
 
 mod broadcast_addr_picker;
 mod client;
-mod client_approver;
 mod encrypted_stream;
 mod filereader;
 mod filewriter;
 mod mnemonic;
 mod models;
 mod server;
+#[cfg(not(test))]
+mod tui;
 
 use crate::{
     client::DownloadClient,
@@ -25,35 +26,21 @@ use crate::{
     server::{ClientApprovalStrategy, FileSrvBuilder},
 };
 use anyhow::{anyhow, Error};
-use async_std::task;
 #[cfg(not(test))]
 use broadcast_addr_picker::select_broadcast_addr;
 use clap::AppSettings;
 use colored::Colorize;
-use slog::Drain;
 #[cfg(test)]
 use std::net::Ipv4Addr;
-use std::{net::IpAddr, path::PathBuf, time::Duration};
+use std::{net::IpAddr, path::PathBuf};
 
 #[cfg(not(test))]
 lazy_static! {
-    pub static ref LOG: slog::Logger = {
-        let decorator = slog_term::TermDecorator::new().build();
-        let drain = slog_term::CompactFormat::new(decorator).build().fuse();
-        let drain = slog_async::Async::new(drain).build().fuse();
-        slog::Logger::root(drain, o!())
-    };
     static ref BROADCAST_ADDR: IpAddr = select_broadcast_addr().unwrap();
 }
 
 #[cfg(test)]
 lazy_static! {
-    static ref LOG: slog::Logger = {
-        let decorator = slog_term::PlainDecorator::new(slog_term::TestStdoutWriter);
-        let drain = slog_term::CompactFormat::new(decorator).build().fuse();
-        let drain = slog_async::Async::new(drain).build().fuse();
-        slog::Logger::root(drain, o!())
-    };
     static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)) };
 }
 
@@ -97,7 +84,7 @@ async fn main() -> Result<(), Error> {
     match matches.subcommand() {
         ("srv", Some(sc)) => {
             let file_path = sc.value_of("FILE").unwrap();
-            info!(LOG, "Serving file {}", &file_path);
+            info!("Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
             let file_siz = serv_file.file_size;
             let encryption = !sc.is_present("no_encryption");
@@ -117,12 +104,10 @@ async fn main() -> Result<(), Error> {
                 .map(Into::into)
                 .unwrap_or_else(|| PathBuf::from("."));
             client.download_to_file(file_path).await?;
-            info!(LOG, "Download complete!");
+            info!("Download complete!");
         }
         _ => return Err(anyhow!("Unmatched subcommand")),
     }
-    // Wait a beat to finish printing any async logging
-    std::thread::sleep(Duration::from_millis(100));
     Ok(())
 }
 

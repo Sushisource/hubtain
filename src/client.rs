@@ -1,6 +1,6 @@
 use crate::{
     encrypted_stream::ClientEncryptedStreamStarter, filewriter::AsyncFileWriter,
-    models::HandshakeReply, BROADCAST_ADDR, LOG,
+    models::HandshakeReply, BROADCAST_ADDR,
 };
 use anyhow::{anyhow, Error};
 use async_std::{
@@ -40,7 +40,7 @@ impl DownloadClient {
         SrvPred: FnMut(&ServerInfo) -> bool,
     {
         let broadcast_addr = SocketAddr::new(*BROADCAST_ADDR, udp_port);
-        info!(LOG, "Client broadcasting to {}", &broadcast_addr);
+        info!("Client broadcasting to {}", &broadcast_addr);
         let mut client_s = UdpSocket::bind("0.0.0.0:0").await?;
         client_s.set_broadcast(true)?;
         let ping = vec![0];
@@ -61,7 +61,7 @@ impl DownloadClient {
             })
             .collect();
         let replies = replies?;
-        info!(LOG, "Client found the following servers: {:?}", &replies);
+        info!("Client found the following servers: {:?}", &replies);
         if replies.is_empty() {
             return Err(anyhow!("No servers found"));
         }
@@ -69,7 +69,6 @@ impl DownloadClient {
         let selected_server = replies.into_iter().find(server_selection_strategy).unwrap();
         let stream = TcpStream::connect(selected_server.addr).await?;
         info!(
-            LOG,
             "Client on {:?} connected to server at {:?}!",
             stream.local_addr(),
             stream.peer_addr()
@@ -92,7 +91,7 @@ impl DownloadClient {
         };
 
         let path = path.as_path();
-        info!(LOG, "Will download to {:?}", path.as_os_str());
+        info!("Will download to {:?}", path.as_os_str());
         let data_len = self.server_info.data_len;
 
         // Do encryption handshake first
@@ -112,7 +111,6 @@ impl DownloadClient {
         drop(download_fut);
 
         info!(
-            LOG,
             "Downloaded {} bytes",
             as_fwriter.bytes_writen.load(Ordering::Relaxed),
         );
@@ -122,7 +120,7 @@ impl DownloadClient {
             .write(true)
             .open(path)?
             .set_len(data_len)?;
-        info!(LOG, "...done!");
+        info!("...done!");
         Ok(())
     }
 
@@ -142,7 +140,7 @@ impl DownloadClient {
         if self.server_info.encrypted {
             let secret = EphemeralSecret::new(&mut OsRng);
             let enc_stream = ClientEncryptedStreamStarter::new(&mut self.stream, secret);
-            info!(LOG, "Client encrypytion handshaking");
+            info!("Client encrypytion handshaking");
             let enc_stream = enc_stream.key_exchange().await?;
             Ok(Box::pin(enc_stream))
         } else {
