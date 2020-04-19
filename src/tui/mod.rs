@@ -1,13 +1,16 @@
-use crate::server::{ClientApprover, ClientId};
+use crate::server::{ClientApprover, ClientId, SHUTDOWN_FLAG};
 use anyhow::Error;
-use async_std::io;
+use crossterm::event::{self, Event};
 use log::{Log, Metadata, Record};
-use std::sync::mpsc::SyncSender;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::{channel, Sender, SyncSender};
+use std::time::Duration;
 
 pub enum TermMsg {
     Quit,
     Log(String),
-    ClientRequest(String),
+    ClientRequest(String, Sender<bool>),
+    Input(Event),
 }
 
 #[derive(Constructor)]
@@ -38,16 +41,27 @@ pub struct TuiApprover {
 #[async_trait::async_trait]
 impl ClientApprover for TuiApprover {
     async fn submit(&self, client_id: &ClientId) -> Result<bool, Error> {
-        let pubkey_mnemonic = mnemonic::to_string(client_id);
-        // TODO: This blocks and is a bad boi in a future
-        self.tx.send(TermMsg::ClientRequest(pubkey_mnemonic))?;
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).await?;
-        let trimmed = input.trim();
-        if trimmed.eq_ignore_ascii_case("y") || trimmed.eq_ignore_ascii_case("yes") {
-            Ok(true)
-        } else {
-            Ok(false)
+        // Chop identifier down to fit. 16 bytes still ought to be plenty unique
+        let pubkey_mnemonic = mnemonic::to_string(&client_id[..16]);
+        // TODO: Unclear if async_std is actually handling this or if block_in_place needs
+        //  to be stabilized
+        let (tx, rx) = channel();
+        self.tx
+            .send(TermMsg::ClientRequest(pubkey_mnemonic, tx))
+            .expect("Couldn't send client");
+        Ok(rx.recv()?)
+    }
+}
+
+/// Can be run in it's own thread to forward crossterm events to the TUI
+pub fn event_forwarder(tx: SyncSender<TermMsg>) -> crossterm::Result<()> {
+    loop {
+        if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
+            break Ok(());
+        }
+        if event::poll(Duration::from_millis(100))? {
+            tx.send(TermMsg::Input(event::read()?))
+                .expect("Must be able to forward result");
         }
     }
 }

@@ -25,6 +25,10 @@ use self::tui::ServerTui;
 use crate::server::client_approver::ConsoleApprover;
 #[cfg(not(test))]
 use crate::tui::{TermMsg, TuiApprover};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Can be set true to order the server to quit.
+pub static SHUTDOWN_FLAG: AtomicBool = AtomicBool::new(false);
 
 /// File server for hubtain's srv mode
 pub struct FileSrv<T>
@@ -91,13 +95,16 @@ where
             self.udp_sock.send_to(&initial_info, &peer).await?;
             if !self.stay_alive {
                 data_handle.await?;
-                info!("Done serving!");
                 break;
             }
+            if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
+                break;
+            }
+            info!("Done serving!");
         }
 
         #[cfg(not(test))]
-        tx.send(TermMsg::Quit)?;
+        let _ = tx.send(TermMsg::Quit);
         Ok(())
     }
 

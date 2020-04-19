@@ -1,9 +1,11 @@
-use crate::tui::{TermMsg, TuiLogger};
+use crate::server::SHUTDOWN_FLAG;
+use crate::tui::{event_forwarder, TermMsg, TuiLogger};
+use crossterm::event::{Event, KeyCode, KeyEvent};
 use log::LevelFilter;
+use std::sync::atomic::Ordering;
 use std::{
     collections::VecDeque,
-    sync::mpsc::Receiver,
-    sync::mpsc::{sync_channel, SyncSender},
+    sync::mpsc::{sync_channel, Receiver, Sender, SyncSender},
 };
 use tui::{
     backend::CrosstermBackend,
@@ -17,7 +19,7 @@ pub struct ServerTui {
     rx: Receiver<TermMsg>,
     logs: VecDeque<String>,
     log_state: ListState,
-    clients: VecDeque<String>,
+    clients: VecDeque<(String, Sender<bool>)>,
     clients_state: ListState,
 }
 
@@ -33,6 +35,8 @@ impl ServerTui {
             .expect("Logger couldn't init");
 
         std::thread::spawn(|| tui.render());
+        let txc = tx.clone();
+        std::thread::spawn(|| event_forwarder(txc));
         tx
     }
 
@@ -41,7 +45,7 @@ impl ServerTui {
             rx,
             logs: VecDeque::with_capacity(LOG_SCROLLBACK),
             log_state: ListState::default(),
-            clients: VecDeque::with_capacity(100),
+            clients: VecDeque::new(),
             clients_state: ListState::default(),
         }
     }
@@ -51,18 +55,58 @@ impl ServerTui {
         let stdout = std::io::stdout();
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
+        terminal.autoresize()?;
         terminal.hide_cursor()?;
 
         loop {
             match self.rx.recv() {
+                Ok(TermMsg::Input(i)) => {
+                    if let Event::Key(KeyEvent { code, .. }) = i {
+                        match code {
+                            KeyCode::Enter => {
+                                // Client approved
+                                self.clients_state
+                                    .selected()
+                                    .map(|i| self.clients.get(i).map(|(_, tx)| tx.send(true)));
+                            }
+                            KeyCode::Up => {
+                                let curselect = self.clients_state.selected();
+                                self.clients_state.select(curselect.map(|x| {
+                                    if x > 0 {
+                                        x - 1
+                                    } else {
+                                        x
+                                    }
+                                }));
+                                if curselect.is_none() {
+                                    self.clients_state.select(Some(0));
+                                }
+                            }
+                            KeyCode::Down => {
+                                let curselect = self.clients_state.selected();
+                                self.clients_state
+                                    .select(curselect.map(|x| (x + 1).min(self.clients.len() - 1)));
+                                if curselect.is_none() {
+                                    self.clients_state.select(Some(0));
+                                }
+                            }
+                            KeyCode::Esc => {
+                                // Quit
+                                SHUTDOWN_FLAG.store(true, Ordering::SeqCst);
+                                break;
+                            }
+                            _ => (),
+                        }
+                    }
+                }
                 Ok(TermMsg::Log(s)) => {
                     self.logs.push_back(s);
                     if self.logs.len() > LOG_SCROLLBACK {
                         self.logs.pop_front();
                     }
                 }
-                Ok(TermMsg::ClientRequest(c)) => {
-                    self.clients.push_back(c);
+                Ok(TermMsg::ClientRequest(c, reply)) => {
+                    self.clients.push_back((c, reply));
                 }
                 Ok(TermMsg::Quit) => break,
                 Err(e) => {
@@ -94,7 +138,7 @@ impl ServerTui {
                 let items = self
                     .clients
                     .iter()
-                    .map(|s| Text::styled(s.to_string(), style));
+                    .map(|s| Text::styled(s.0.to_string(), style));
                 let items = List::new(items)
                     .block(client_block)
                     .style(style)
@@ -104,6 +148,9 @@ impl ServerTui {
             })?;
         }
 
+        terminal.clear()?;
+
+        println!("Done");
         Ok(())
     }
 }
