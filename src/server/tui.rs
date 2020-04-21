@@ -1,11 +1,22 @@
-use crate::server::SHUTDOWN_FLAG;
-use crate::tui::{event_forwarder, TermMsg, TuiLogger};
-use crossterm::event::{Event, KeyCode, KeyEvent};
+use crate::{
+    server::SHUTDOWN_FLAG,
+    tui::{event_forwarder, TermMsg, TuiLogger},
+};
+use anyhow::Error;
+use crossterm::{
+    event::{Event, KeyCode, KeyEvent, KeyModifiers},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen},
+};
 use log::LevelFilter;
-use std::sync::atomic::Ordering;
 use std::{
     collections::VecDeque,
-    sync::mpsc::{sync_channel, Receiver, Sender, SyncSender},
+    io::{self, stdout, Write},
+    sync::{
+        atomic::Ordering,
+        mpsc::{sync_channel, Receiver, Sender, SyncSender},
+    },
+    thread::JoinHandle,
 };
 use tui::{
     backend::CrosstermBackend,
@@ -23,10 +34,33 @@ pub struct ServerTui {
     clients_state: ListState,
 }
 
+pub struct TuiHandle {
+    pub tx: SyncSender<TermMsg>,
+    render_thread: JoinHandle<io::Result<()>>,
+    event_thread: JoinHandle<crossterm::Result<()>>,
+}
+
+impl TuiHandle {
+    pub fn join(self) {
+        // In case it hasn't been already.
+        SHUTDOWN_FLAG.store(true, Ordering::SeqCst);
+        self.render_thread
+            .join()
+            .expect("Render thread exited unclean")
+            .unwrap();
+        self.event_thread
+            .join()
+            .expect("Event thread exited unclean")
+            .unwrap();
+        let _ = execute!(stdout(), LeaveAlternateScreen);
+        // Can potentially print a nice little summary here after returning to normal buffer
+    }
+}
+
 const LOG_SCROLLBACK: usize = 1000;
 
 impl ServerTui {
-    pub fn start() -> SyncSender<TermMsg> {
+    pub fn start() -> Result<TuiHandle, Error> {
         let (tx, rx) = sync_channel::<TermMsg>(100);
         let tui = ServerTui::new(rx);
         let txc = tx.clone();
@@ -34,10 +68,16 @@ impl ServerTui {
             .map(|()| log::set_max_level(LevelFilter::Debug))
             .expect("Logger couldn't init");
 
-        std::thread::spawn(|| tui.render());
+        crossterm::terminal::enable_raw_mode()?;
+        execute!(stdout(), EnterAlternateScreen)?;
+        let render_thread = std::thread::spawn(|| tui.render());
         let txc = tx.clone();
-        std::thread::spawn(|| event_forwarder(txc));
-        tx
+        let event_thread = std::thread::spawn(|| event_forwarder(txc));
+        Ok(TuiHandle {
+            tx,
+            render_thread,
+            event_thread,
+        })
     }
 
     fn new(rx: Receiver<TermMsg>) -> Self {
@@ -58,10 +98,17 @@ impl ServerTui {
         terminal.autoresize()?;
         terminal.hide_cursor()?;
 
+        macro_rules! quit {
+            () => {
+                SHUTDOWN_FLAG.store(true, Ordering::SeqCst);
+                break;
+            };
+        }
+
         loop {
             match self.rx.recv() {
                 Ok(TermMsg::Input(i)) => {
-                    if let Event::Key(KeyEvent { code, .. }) = i {
+                    if let Event::Key(KeyEvent { code, modifiers }) = i {
                         match code {
                             KeyCode::Enter => {
                                 // Client approved
@@ -69,31 +116,31 @@ impl ServerTui {
                                     .selected()
                                     .map(|i| self.clients.get(i).map(|(_, tx)| tx.send(true)));
                             }
-                            KeyCode::Up => {
-                                let curselect = self.clients_state.selected();
-                                self.clients_state.select(curselect.map(|x| {
-                                    if x > 0 {
-                                        x - 1
-                                    } else {
-                                        x
-                                    }
-                                }));
-                                if curselect.is_none() {
-                                    self.clients_state.select(Some(0));
-                                }
-                            }
-                            KeyCode::Down => {
+                            // TODO: Arrow keys broken in raw mode
+                            KeyCode::Char('k') => {
                                 let curselect = self.clients_state.selected();
                                 self.clients_state
-                                    .select(curselect.map(|x| (x + 1).min(self.clients.len() - 1)));
+                                    .select(curselect.map(|x| x.saturating_sub(1)));
                                 if curselect.is_none() {
                                     self.clients_state.select(Some(0));
                                 }
                             }
-                            KeyCode::Esc => {
-                                // Quit
-                                SHUTDOWN_FLAG.store(true, Ordering::SeqCst);
-                                break;
+                            KeyCode::Char('j') => {
+                                let curselect = self.clients_state.selected();
+                                self.clients_state
+                                    .select(curselect.map(|x| {
+                                        (x + 1).min(self.clients.len().saturating_sub(1))
+                                    }));
+                                if curselect.is_none() {
+                                    self.clients_state.select(Some(0));
+                                }
+                            }
+                            // Have to handle ctrl-c because of terminal raw mode
+                            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                                quit!();
+                            }
+                            KeyCode::Esc | KeyCode::Char('q') => {
+                                quit!();
                             }
                             _ => (),
                         }
@@ -108,7 +155,6 @@ impl ServerTui {
                 Ok(TermMsg::ClientRequest(c, reply)) => {
                     self.clients.push_back((c, reply));
                 }
-                Ok(TermMsg::Quit) => break,
                 Err(e) => {
                     // TODO: This won't display.
                     error!("Problem receiving in UI loop: {:?}", e)
@@ -146,11 +192,14 @@ impl ServerTui {
                     .highlight_symbol(">");
                 f.render_stateful_widget(items, chunks[1], &mut self.clients_state);
             })?;
+
+            if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
+                break;
+            }
         }
 
         terminal.clear()?;
 
-        println!("Done");
         Ok(())
     }
 }

@@ -6,8 +6,8 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Sender, SyncSender};
 use std::time::Duration;
 
+#[derive(Debug)]
 pub enum TermMsg {
-    Quit,
     Log(String),
     ClientRequest(String, Sender<bool>),
     Input(Event),

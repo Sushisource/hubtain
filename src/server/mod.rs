@@ -11,6 +11,7 @@ use crate::{
 };
 use anyhow::Error;
 use async_std::{
+    io,
     net::{TcpListener, UdpSocket},
     task::{spawn, JoinHandle},
 };
@@ -24,8 +25,9 @@ use self::tui::ServerTui;
 #[cfg(test)]
 use crate::server::client_approver::ConsoleApprover;
 #[cfg(not(test))]
-use crate::tui::{TermMsg, TuiApprover};
+use crate::tui::TuiApprover;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 /// Can be set true to order the server to quit.
 pub static SHUTDOWN_FLAG: AtomicBool = AtomicBool::new(false);
@@ -52,9 +54,9 @@ where
     /// Begin listening for connections and serving data.
     pub async fn serve(self) -> Result<(), Error> {
         // TODO: Handle this better than compile flags
-        // TODO: Allow for a fallback cli mode for one-client too
+        // TODO: Allow for a fallback cli mode for one-client too, and when tui not supported
         #[cfg(not(test))]
-        let tx = ServerTui::start();
+        let tui_handle = ServerTui::start()?;
 
         info!("Server name: {}", self.name);
         let tcp_port = self.tcp_sock.local_addr()?.port();
@@ -65,7 +67,7 @@ where
         #[cfg(test)]
         let approver = Box::leak(Box::new(ConsoleApprover::default()));
         #[cfg(not(test))]
-        let approver = Box::leak(Box::new(TuiApprover::new(tx.clone())));
+        let approver = Box::leak(Box::new(TuiApprover::new(tui_handle.tx.clone())));
 
         let data_handle = spawn(FileSrv::data_srv(
             self.tcp_sock,
@@ -83,7 +85,22 @@ where
         // Wait for broadcast from peer
         let mut buf = vec![0u8; 100];
         loop {
-            let (_, peer) = self.udp_sock.recv_from(&mut buf).await?;
+            if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
+                break;
+            }
+            let (_, peer) = match io::timeout(
+                Duration::from_millis(100),
+                self.udp_sock.recv_from(&mut buf),
+            )
+            .await
+            {
+                Err(e) if e.kind() == io::ErrorKind::TimedOut => {
+                    // Need to keep checking the shutdown flag. Probably a more "future"y
+                    // way to do this
+                    continue;
+                }
+                r => r,
+            }?;
             info!("Client ping from {}", &peer);
             // Reply with name and tcp portnum
             let initial_info = serialize(&HandshakeReply {
@@ -97,14 +114,9 @@ where
                 data_handle.await?;
                 break;
             }
-            if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
-                break;
-            }
-            info!("Done serving!");
+            info!("Done serving, bye!");
         }
-
-        #[cfg(not(test))]
-        let _ = tx.send(TermMsg::Quit);
+        tui_handle.join();
         Ok(())
     }
 
