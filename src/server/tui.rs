@@ -32,6 +32,7 @@ pub struct ServerTui {
     log_state: ListState,
     clients: VecDeque<(String, Sender<bool>)>,
     clients_state: ListState,
+    name: String,
 }
 
 pub struct TuiHandle {
@@ -60,9 +61,9 @@ impl TuiHandle {
 const LOG_SCROLLBACK: usize = 1000;
 
 impl ServerTui {
-    pub fn start() -> Result<TuiHandle, Error> {
+    pub fn start(name: String) -> Result<TuiHandle, Error> {
         let (tx, rx) = sync_channel::<TermMsg>(100);
-        let tui = ServerTui::new(rx);
+        let tui = ServerTui::new(name, rx);
         let txc = tx.clone();
         log::set_logger(Box::leak(Box::new(TuiLogger::new(txc))))
             .map(|()| log::set_max_level(LevelFilter::Debug))
@@ -80,13 +81,14 @@ impl ServerTui {
         })
     }
 
-    fn new(rx: Receiver<TermMsg>) -> Self {
+    fn new(name: String, rx: Receiver<TermMsg>) -> Self {
         ServerTui {
             rx,
             logs: VecDeque::with_capacity(LOG_SCROLLBACK),
             log_state: ListState::default(),
             clients: VecDeque::new(),
             clients_state: ListState::default(),
+            name,
         }
     }
 
@@ -167,7 +169,8 @@ impl ServerTui {
                     .constraints([Constraint::Percentage(80), Constraint::Percentage(20)].as_ref())
                     .split(f.size());
 
-                let logblock = Block::default().title("Log").borders(Borders::ALL);
+                let title = format!(" Server name: {} ", &self.name);
+                let logblock = Block::default().title(&title).borders(Borders::ALL);
                 f.render_widget(logblock, chunks[0]);
                 let client_block = Block::default().title("Clients").borders(Borders::ALL);
                 f.render_widget(client_block, chunks[1]);

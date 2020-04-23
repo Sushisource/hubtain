@@ -56,9 +56,8 @@ where
         // TODO: Handle this better than compile flags
         // TODO: Allow for a fallback cli mode for one-client too, and when tui not supported
         #[cfg(not(test))]
-        let tui_handle = ServerTui::start()?;
+        let tui_handle = ServerTui::start(self.name.clone())?;
 
-        info!("Server name: {}", self.name);
         let tcp_port = self.tcp_sock.local_addr()?.port();
 
         self.udp_sock.set_broadcast(true)?;
@@ -114,7 +113,7 @@ where
                 data_handle.await?;
                 break;
             }
-            info!("Done serving, bye!");
+            info!("Done serving");
         }
         tui_handle.join();
         Ok(())
