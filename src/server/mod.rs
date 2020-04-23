@@ -2,18 +2,18 @@ mod client_approver;
 #[cfg(not(test))]
 mod tui;
 
-pub use client_approver::{ClientApprover, ClientId};
+pub use client_approver::ClientApprover;
 
 use crate::{
     encrypted_stream::{EncStreamErr, ServerEncryptedStreamStarter},
     mnemonic::random_word,
     models::HandshakeReply,
 };
-use anyhow::Error;
+use anyhow::{Context, Error};
 use async_std::{
     io,
     net::{TcpListener, UdpSocket},
-    task::{spawn, JoinHandle},
+    task::spawn,
 };
 use bincode::serialize;
 use futures::io::AsyncRead;
@@ -141,30 +141,45 @@ where
             info!("Accepted download connection from {:?}", &addr);
             let data_src = data.clone();
             let enctype = enctype.clone();
-            let h: JoinHandle<Result<(), Error>> = spawn(async move {
-                match enctype {
-                    EncryptionType::Ephemeral => {
-                        info!("Server handshaking");
-                        let secret = EphemeralSecret::new(&mut OsRng);
-                        let enc_stream = ServerEncryptedStreamStarter::new(&mut stream, secret);
-                        let mut encrypted_stream =
-                            match enc_stream.key_exchange(client_strat, approver).await {
-                                Ok(es) => es,
-                                Err(EncStreamErr::ClientNotAccepted) => return Ok(()),
-                                e => e?,
-                            };
-                        info!("Client downloading!");
-                        futures::io::copy(data_src, &mut encrypted_stream).await?;
+            // TODO: On error, send message indicating client dropped to approver
+            let h = spawn(async move {
+                let res = (|| async {
+                    match enctype {
+                        EncryptionType::Ephemeral => {
+                            info!("Server handshaking");
+                            let secret = EphemeralSecret::new(&mut OsRng);
+                            let enc_stream = ServerEncryptedStreamStarter::new(&mut stream, secret);
+                            let mut encrypted_stream =
+                                match enc_stream.key_exchange(client_strat, approver).await {
+                                    Ok(es) => es,
+                                    Err(EncStreamErr::ClientNotAccepted) => {
+                                        return Result::<_, anyhow::Error>::Ok(())
+                                    }
+                                    e => e?,
+                                };
+                            futures::io::copy(data_src, &mut encrypted_stream)
+                                .await
+                                .context(format!(
+                                    "Couldn't complete transfer to client {}",
+                                    encrypted_stream.get_client_id(),
+                                ))?;
+                        }
+                        EncryptionType::None => {
+                            futures::io::copy(data_src, &mut stream)
+                                .await
+                                .context("Couldn't complete transfer to client")?;
+                        }
                     }
-                    EncryptionType::None => {
-                        info!("Client downloading!");
-                        futures::io::copy(data_src, &mut stream).await?;
-                    }
+                    Ok(())
+                })()
+                .await;
+                if let Err(e) = &res {
+                    error!("{}", e);
                 };
-                Ok(())
+                res
             });
             if !stay_alive {
-                // TODO: Does this screw up multi client mode?
+                // Assumes only one client matters in no-stay-alive mode.
                 h.await?;
                 return Ok(());
             }

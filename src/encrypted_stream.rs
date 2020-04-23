@@ -4,8 +4,9 @@
 //! given it may take long enough to count as blocking - but it does make for an easy-to-use
 //! interface and is plenty fast in practice.
 
+use crate::models::ClientId;
 use crate::server::{ClientApprovalStrategy, ClientApprover};
-use anyhow::anyhow;
+use anyhow::{anyhow, Context as AnyhowCtx};
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use ring::aead::{
     Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, CHACHA20_POLY1305,
@@ -125,10 +126,14 @@ where
                 self.underlying.write_all(&[1]).await?;
             }
             ClientApprovalStrategy::Interactive => {
-                let approved = approver.submit(their_pubkey.as_bytes()).await?;
+                let pubkey_bytes = their_pubkey.as_bytes();
+                let approved = approver.submit(ClientId::new(*pubkey_bytes)).await?;
                 // Server sends signal to client if it is not approved for graceful hangup
                 let approval_byte = if approved { 1 } else { 0 };
-                self.underlying.write_all(&[approval_byte]).await?;
+                self.underlying
+                    .write_all(&[approval_byte])
+                    .await
+                    .context("Client hung up during approval")?;
 
                 if !approved {
                     return Err(EncStreamErr::ClientNotAccepted);
@@ -138,7 +143,7 @@ where
 
         // Compute shared secret
         let shared_secret = self.secret.diffie_hellman(&their_pubkey);
-        EncryptedWriteStream::new(self.underlying, shared_secret)
+        EncryptedWriteStream::new(self.underlying, shared_secret, their_pubkey)
     }
 }
 
@@ -152,20 +157,33 @@ struct EncryptedPacket {
 pub struct EncryptedWriteStream<'a, S: AsyncWrite> {
     underlying: Pin<&'a mut S>,
     key: SealingKey<SharedSecretNonceSeq>,
+    their_pubkey: PublicKey,
 }
 
 impl<'a, S> EncryptedWriteStream<'a, S>
 where
     S: AsyncWrite,
 {
-    fn new(underlying: Pin<&'a mut S>, shared_secret: SharedSecret) -> Result<Self, EncStreamErr> {
+    fn new(
+        underlying: Pin<&'a mut S>,
+        shared_secret: SharedSecret,
+        their_pubkey: PublicKey,
+    ) -> Result<Self, EncStreamErr> {
         let unbound_k = UnboundKey::new(&CHACHA20_POLY1305, shared_secret.as_bytes())
             .map_err(|_| anyhow!("Couldn't bind key"))?;
         let derived_nonce_seq = SharedSecretNonceSeq::new(shared_secret);
         // key used to encrypt data
         let key = SealingKey::new(unbound_k, derived_nonce_seq);
 
-        Ok(Self { underlying, key })
+        Ok(Self {
+            underlying,
+            key,
+            their_pubkey,
+        })
+    }
+
+    pub fn get_client_id(&self) -> ClientId {
+        ClientId::new(*self.their_pubkey.as_bytes())
     }
 }
 

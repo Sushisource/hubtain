@@ -1,15 +1,20 @@
-use crate::server::{ClientApprover, ClientId, SHUTDOWN_FLAG};
+use crate::models::ClientId;
+use crate::server::{ClientApprover, SHUTDOWN_FLAG};
 use anyhow::Error;
 use crossterm::event::{self, Event};
 use log::{Log, Metadata, Record};
-use std::sync::atomic::Ordering;
-use std::sync::mpsc::{channel, Sender, SyncSender};
-use std::time::Duration;
+use std::{
+    sync::{
+        atomic::Ordering,
+        mpsc::{channel, Sender, SyncSender},
+    },
+    time::Duration,
+};
 
 #[derive(Debug)]
 pub enum TermMsg {
     Log(String),
-    ClientRequest(String, Sender<bool>),
+    ClientRequest(ClientId, Sender<bool>),
     Input(Event),
 }
 
@@ -40,14 +45,12 @@ pub struct TuiApprover {
 
 #[async_trait::async_trait]
 impl ClientApprover for TuiApprover {
-    async fn submit(&self, client_id: &ClientId) -> Result<bool, Error> {
-        // Chop identifier down to fit. 16 bytes still ought to be plenty unique
-        let pubkey_mnemonic = mnemonic::to_string(&client_id[..16]);
+    async fn submit(&self, client_id: ClientId) -> Result<bool, Error> {
         // TODO: Unclear if async_std is actually handling this or if block_in_place needs
         //  to be stabilized
         let (tx, rx) = channel();
         self.tx
-            .send(TermMsg::ClientRequest(pubkey_mnemonic, tx))
+            .send(TermMsg::ClientRequest(client_id, tx))
             .expect("Couldn't send client");
         Ok(rx.recv()?)
     }

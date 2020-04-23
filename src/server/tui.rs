@@ -1,3 +1,4 @@
+use crate::models::ClientId;
 use crate::{
     server::SHUTDOWN_FLAG,
     tui::{event_forwarder, TermMsg, TuiLogger},
@@ -30,7 +31,7 @@ pub struct ServerTui {
     rx: Receiver<TermMsg>,
     logs: VecDeque<String>,
     log_state: ListState,
-    clients: VecDeque<(String, Sender<bool>)>,
+    clients: VecDeque<(ClientId, Sender<bool>)>,
     clients_state: ListState,
     name: String,
 }
@@ -60,6 +61,7 @@ impl TuiHandle {
 
 const LOG_SCROLLBACK: usize = 1000;
 
+// TODO: Don't render client approver in unencrypted mode
 impl ServerTui {
     pub fn start(name: String) -> Result<TuiHandle, Error> {
         let (tx, rx) = sync_channel::<TermMsg>(100);
@@ -113,10 +115,22 @@ impl ServerTui {
                     if let Event::Key(KeyEvent { code, modifiers }) = i {
                         match code {
                             KeyCode::Enter => {
-                                // Client approved
+                                // Client approved, remove it
+                                self.clients_state.selected().map(|i| {
+                                    self.clients.remove(i).map(|(name, tx)| {
+                                        // TODO: Find a way to shorten names more, or
+                                        //  wait for wrapping supprt or something else. Same
+                                        //  for in approver window.
+                                        info!("Client downloading: {}", name);
+                                        tx.send(true)
+                                    })
+                                });
+                            }
+                            KeyCode::Char('n') => {
+                                // Client denied, remove it
                                 self.clients_state
                                     .selected()
-                                    .map(|i| self.clients.get(i).map(|(_, tx)| tx.send(true)));
+                                    .map(|i| self.clients.remove(i).map(|(_, tx)| tx.send(false)));
                             }
                             // TODO: Arrow keys broken in raw mode
                             KeyCode::Char('k') => {
@@ -172,16 +186,14 @@ impl ServerTui {
                 let title = format!(" Server name: {} ", &self.name);
                 let logblock = Block::default().title(&title).borders(Borders::ALL);
                 f.render_widget(logblock, chunks[0]);
-                let client_block = Block::default().title("Clients").borders(Borders::ALL);
+                let client_block = Block::default()
+                    .title("Client requests (enter to approve, 'n' to deny)")
+                    .borders(Borders::ALL);
                 f.render_widget(client_block, chunks[1]);
 
                 let style = Style::default().fg(Color::White).bg(Color::Black);
                 let items = self.logs.iter().map(|s| Text::styled(s.to_string(), style));
-                let items = List::new(items)
-                    .block(logblock)
-                    .style(style)
-                    .highlight_style(style.fg(Color::LightGreen).modifier(Modifier::BOLD))
-                    .highlight_symbol(">");
+                let items = List::new(items).block(logblock).style(style);
                 f.render_stateful_widget(items, chunks[0], &mut self.log_state);
 
                 let items = self
