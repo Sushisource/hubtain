@@ -83,12 +83,11 @@ async fn main() -> Result<(), Error> {
 
     match matches.subcommand() {
         ("srv", Some(sc)) => {
-            let file_path = sc.value_of("FILE").unwrap();
+            let file_path = sc.value_of("FILE").expect("file arg is required");
             info!("Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
-            let file_siz = serv_file.file_size;
             let encryption = !sc.is_present("no_encryption");
-            let fsrv = FileSrvBuilder::new(serv_file, file_siz)
+            let fsrv = FileSrvBuilder::new(serv_file)
                 .set_udp_port(42444)
                 .set_stayalive(sc.is_present("stayalive"))
                 .set_encryption(encryption, ClientApprovalStrategy::Interactive)
@@ -114,6 +113,7 @@ async fn main() -> Result<(), Error> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::server::test_filesrv;
     use crate::{
         client::test_srvr_sel, filereader::AsyncFileReader, server::ClientApprovalStrategy,
         server::FileSrvBuilder,
@@ -126,10 +126,7 @@ mod test {
 
     #[async_std::test]
     async fn basic_transfer() {
-        let fsrv = FileSrvBuilder::new(TEST_DATA, TEST_DATA.len() as u64)
-            .build()
-            .await
-            .unwrap();
+        let fsrv = test_filesrv(TEST_DATA, false).await;
         let udp_port = fsrv.udp_port().unwrap();
         let server_f = spawn(fsrv.serve());
 
@@ -143,11 +140,7 @@ mod test {
 
     #[async_std::test]
     async fn encrypted_transfer() {
-        let fsrv = FileSrvBuilder::new(TEST_DATA, TEST_DATA.len() as u64)
-            .set_encryption(true, ClientApprovalStrategy::ApproveAll)
-            .build()
-            .await
-            .unwrap();
+        let fsrv = test_filesrv(TEST_DATA, true).await;
         let udp_port = fsrv.udp_port().unwrap();
         let server_f = spawn(fsrv.serve());
 
@@ -171,8 +164,7 @@ mod test {
 
     async fn file_transfer_test(encryption: bool) {
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
-        let file_siz = test_file.file_size;
-        let fsrv = FileSrvBuilder::new(test_file, file_siz)
+        let fsrv = FileSrvBuilder::new(test_file)
             .set_encryption(encryption, ClientApprovalStrategy::ApproveAll)
             .build()
             .await
@@ -204,8 +196,7 @@ mod test {
     #[async_std::test]
     async fn multiple_small_transfer() {
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
-        let file_siz = test_file.file_size;
-        let fsrv = FileSrvBuilder::new(test_file, file_siz)
+        let fsrv = FileSrvBuilder::new(test_file)
             .set_stayalive(true)
             .build()
             .await

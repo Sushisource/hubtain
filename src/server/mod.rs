@@ -9,7 +9,7 @@ use crate::{
     mnemonic::random_word,
     models::HandshakeReply,
 };
-use anyhow::{Context, Error};
+use anyhow::{anyhow, Context, Error};
 use async_std::{
     io,
     net::{TcpListener, UdpSocket},
@@ -18,16 +18,20 @@ use async_std::{
 use bincode::serialize;
 use futures::io::AsyncRead;
 use rand::rngs::OsRng;
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 use x25519_dalek::EphemeralSecret;
 
 #[cfg(not(test))]
 use self::tui::ServerTui;
+use crate::filereader::AsyncFileReader;
 #[cfg(test)]
 use crate::server::client_approver::ConsoleApprover;
 #[cfg(not(test))]
 use crate::tui::TuiApprover;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::path::PathBuf;
 
 /// Can be set true to order the server to quit.
 pub static SHUTDOWN_FLAG: AtomicBool = AtomicBool::new(false);
@@ -45,6 +49,7 @@ where
     name: String,
     encrypted: bool,
     client_approval_strategy: ClientApprovalStrategy,
+    file_name: String,
 }
 
 impl<T> FileSrv<T>
@@ -107,6 +112,7 @@ where
                 tcp_port,
                 data_length: self.data_length,
                 encrypted: self.encrypted,
+                file_name: self.file_name.clone(),
             })?;
             self.udp_sock.send_to(&initial_info, &peer).await?;
             if !self.stay_alive {
@@ -115,7 +121,10 @@ where
             }
             info!("Done serving");
         }
+
+        #[cfg(not(test))]
         tui_handle.join();
+
         Ok(())
     }
 
@@ -200,17 +209,14 @@ pub enum ClientApprovalStrategy {
     ApproveAll,
 }
 
-pub struct FileSrvBuilder<T>
-where
-    T: 'static + AsyncRead + Send + Unpin + Clone,
-{
-    data: T,
-    data_len: u64,
+pub struct FileSrvBuilder {
+    data: AsyncFileReader,
     udp_port: u16,
     stay_alive: bool,
     encryption: bool,
     listen_addr: String,
     client_approval_strategy: ClientApprovalStrategy,
+    file_path: PathBuf,
 }
 
 #[cfg(not(test))]
@@ -235,14 +241,11 @@ fn udp_srv_bind_addr(port_num: u16) -> String {
     format!("127.0.0.1:{}", port_num)
 }
 
-impl<T> FileSrvBuilder<T>
-where
-    T: 'static + AsyncRead + Send + Unpin + Clone,
-{
-    pub fn new(data: T, data_len: u64) -> FileSrvBuilder<T> {
+impl FileSrvBuilder {
+    pub fn new(data: AsyncFileReader) -> Self {
         FileSrvBuilder {
+            file_path: data.orig_path.clone(),
             data,
-            data_len,
             udp_port: 0,
             stay_alive: false,
             encryption: false,
@@ -271,19 +274,54 @@ where
         self
     }
 
-    pub async fn build(self) -> Result<FileSrv<T>, Error> {
+    /// Build the file server, binding sockets in the process
+    pub async fn build(self) -> Result<FileSrv<AsyncFileReader>, Error> {
         let tcp_sock = TcpListener::bind(format!("{}:0", &self.listen_addr)).await?;
         let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port)).await?;
         let name = random_word();
+        if !self.file_path.is_file() {
+            return Err(anyhow!("Provied path is not a file!"));
+        }
+        let file_name = self
+            .file_path
+            .file_name()
+            .expect("just asserted it's a file")
+            .to_str()
+            .ok_or_else(|| anyhow!("Provied path has weird characters!"))?
+            .to_string();
         Ok(FileSrv {
             stay_alive: self.stay_alive,
             udp_sock,
             tcp_sock,
+            data_length: self.data.file_size,
             data: self.data,
-            data_length: self.data_len,
             name: name.to_string(),
             encrypted: self.encryption,
             client_approval_strategy: self.client_approval_strategy,
+            file_name,
         })
+    }
+}
+
+#[cfg(test)]
+pub async fn test_filesrv(
+    data: &'static [u8],
+    encrypted: bool,
+) -> FileSrv<impl AsyncRead + Send + Unpin + Clone> {
+    let tcp_sock = TcpListener::bind(format!("{}:0", "127.0.0.1"))
+        .await
+        .unwrap();
+    let udp_sock = UdpSocket::bind(udp_srv_bind_addr(0)).await.unwrap();
+    let name = random_word();
+    FileSrv {
+        stay_alive: false,
+        udp_sock,
+        tcp_sock,
+        data_length: data.len() as u64,
+        data,
+        name: name.to_string(),
+        encrypted,
+        client_approval_strategy: ClientApprovalStrategy::ApproveAll,
+        file_name: "not a real file".to_string(),
     }
 }

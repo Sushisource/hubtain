@@ -11,7 +11,7 @@ use std::{
 pub struct AsyncFileReader {
     file: File,
     pub file_size: u64,
-    orig_path: PathBuf,
+    pub orig_path: PathBuf,
 }
 
 impl Clone for AsyncFileReader {

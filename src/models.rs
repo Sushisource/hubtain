@@ -7,6 +7,7 @@ pub struct HandshakeReply {
     pub tcp_port: u16,
     pub data_length: u64,
     pub encrypted: bool,
+    pub file_name: String,
 }
 
 #[derive(Copy, Clone, Constructor, Hash, Eq, PartialEq)]
