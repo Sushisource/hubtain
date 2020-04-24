@@ -30,6 +30,7 @@ use anyhow::{anyhow, Error};
 use broadcast_addr_picker::select_broadcast_addr;
 use clap::AppSettings;
 use colored::Colorize;
+use log::LevelFilter;
 #[cfg(test)]
 use std::net::Ipv4Addr;
 use std::{net::IpAddr, path::PathBuf};
@@ -96,7 +97,8 @@ async fn main() -> Result<(), Error> {
             fsrv.serve().await?;
         }
         ("fetch", Some(sc)) => {
-            // TODO: Interactive server selector
+            // TODO: Interactive server selector / tui
+            env_logger::builder().filter_level(LevelFilter::Info).init();
             let client = DownloadClient::connect(42444, |_| true).await?;
             let file_path = sc
                 .value_of("FILE")

@@ -53,7 +53,7 @@ impl DownloadClient {
                 let mut tcp_sock_addr = peer;
                 tcp_sock_addr.set_port(server_info.tcp_port);
                 Ok(ServerInfo::new(
-                    server_info.server_name,
+                    server_info.file_name,
                     tcp_sock_addr,
                     server_info.data_length,
                     server_info.encrypted,
@@ -85,7 +85,7 @@ impl DownloadClient {
     pub async fn download_to_file(mut self, path: PathBuf) -> Result<(), Error> {
         // TODO: Allow override / get filename from server
         let path = if path.is_dir() {
-            path.join(&self.server_info.name)
+            path.join(&self.server_info.download_name)
         } else {
             path
         };
@@ -174,7 +174,7 @@ async fn progress_counter(progress: Arc<AtomicUsize>, total_size: u64) {
 #[derive(Constructor, Debug)]
 /// Identifying information of a server discovered on the network
 pub struct ServerInfo {
-    name: String,
+    download_name: String,
     addr: SocketAddr,
     data_len: u64,
     encrypted: bool,
