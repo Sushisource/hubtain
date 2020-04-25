@@ -127,10 +127,10 @@ async fn main() -> Result<(), Error> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::server::test_filesrv;
     use crate::{
-        client::test_srvr_sel, filereader::AsyncFileReader, server::ClientApprovalStrategy,
-        server::FileSrvBuilder,
+        client::test_srvr_sel,
+        filereader::AsyncFileReader,
+        server::{test_filesrv, ClientApprovalStrategy, FileSrvBuilder},
     };
     use async_std::task::spawn;
     use std::{fs::File, io::Read};

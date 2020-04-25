@@ -72,6 +72,7 @@ where
 
         // Client reads the accepted/rejected byte
         let mut buff = vec![0; 1];
+        info!("Awaiting approval from server...");
         self.underlying.read_exact(&mut buff).await?;
         // Give up if we were rejected
         if buff[0] != 1 {

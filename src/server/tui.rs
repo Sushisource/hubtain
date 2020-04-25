@@ -62,7 +62,7 @@ impl TuiHandle {
 
 const LOG_SCROLLBACK: usize = 1000;
 
-// TODO: Don't render client approver in unencrypted mode
+// TODO: Use part of client approver line as percent complete
 impl ServerTui {
     pub fn start(name: String, file_name: String) -> Result<TuiHandle, Error> {
         let (tx, rx) = sync_channel::<TermMsg>(100);
@@ -174,7 +174,7 @@ impl ServerTui {
                     self.clients.push_back((c, reply));
                 }
                 Err(e) => {
-                    // TODO: This won't display.
+                    // TODO: This won't display. Probably need log file or something.
                     error!("Problem receiving in UI loop: {:?}", e)
                 }
             };
@@ -201,10 +201,11 @@ impl ServerTui {
                 let items = List::new(items).block(logblock).style(style);
                 f.render_stateful_widget(items, chunks[0], &mut self.log_state);
 
+                let chop_id_at = chunks[1].width - 5;
                 let items = self
                     .clients
                     .iter()
-                    .map(|s| Text::styled(s.0.to_string(), style));
+                    .map(|s| Text::styled(s.0.to_string().split_off(chop_id_at as usize), style));
                 let items = List::new(items)
                     .block(client_block)
                     .style(style)

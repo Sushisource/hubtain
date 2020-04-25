@@ -83,7 +83,6 @@ impl DownloadClient {
     /// location is a directory, the file's name will be determined by the server it's downloaded
     /// from. This consumes the client.
     pub async fn download_to_file(mut self, path: PathBuf) -> Result<(), Error> {
-        // TODO: Allow override / get filename from server
         let path = if path.is_dir() {
             path.join(&self.server_info.download_name)
         } else {
@@ -186,8 +185,6 @@ pub fn test_srvr_sel(_: &ServerInfo) -> bool {
     true
 }
 
-// TODO: Don't need to bother keeping this so generic. Move inside impl and only accept one
-//   reply per socket addr. Return map instead.
 async fn read_replies_for(
     sock: &mut UdpSocket,
     duration: Duration,
