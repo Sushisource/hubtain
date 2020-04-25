@@ -34,6 +34,7 @@ pub struct ServerTui {
     clients: VecDeque<(ClientId, Sender<bool>)>,
     clients_state: ListState,
     name: String,
+    file_name: String,
 }
 
 pub struct TuiHandle {
@@ -63,9 +64,9 @@ const LOG_SCROLLBACK: usize = 1000;
 
 // TODO: Don't render client approver in unencrypted mode
 impl ServerTui {
-    pub fn start(name: String) -> Result<TuiHandle, Error> {
+    pub fn start(name: String, file_name: String) -> Result<TuiHandle, Error> {
         let (tx, rx) = sync_channel::<TermMsg>(100);
-        let tui = ServerTui::new(name, rx);
+        let tui = ServerTui::new(name, rx, file_name);
         let txc = tx.clone();
         log::set_logger(Box::leak(Box::new(TuiLogger::new(txc))))
             .map(|()| log::set_max_level(LevelFilter::Debug))
@@ -83,7 +84,7 @@ impl ServerTui {
         })
     }
 
-    fn new(name: String, rx: Receiver<TermMsg>) -> Self {
+    fn new(name: String, rx: Receiver<TermMsg>, file_name: String) -> Self {
         ServerTui {
             rx,
             logs: VecDeque::with_capacity(LOG_SCROLLBACK),
@@ -91,6 +92,7 @@ impl ServerTui {
             clients: VecDeque::new(),
             clients_state: ListState::default(),
             name,
+            file_name,
         }
     }
 
@@ -183,7 +185,10 @@ impl ServerTui {
                     .constraints([Constraint::Percentage(80), Constraint::Percentage(20)].as_ref())
                     .split(f.size());
 
-                let title = format!(" Server name: {} ", &self.name);
+                let title = format!(
+                    " Server name: {} - Serving: {} ",
+                    &self.name, &self.file_name
+                );
                 let logblock = Block::default().title(&title).borders(Borders::ALL);
                 f.render_widget(logblock, chunks[0]);
                 let client_block = Block::default()

@@ -61,7 +61,7 @@ where
         // TODO: Handle this better than compile flags
         // TODO: Allow for a fallback cli mode for one-client too, and when tui not supported
         #[cfg(not(test))]
-        let tui_handle = ServerTui::start(self.name.clone())?;
+        let tui_handle = ServerTui::start(self.name.clone(), self.file_name.clone())?;
 
         let tcp_port = self.tcp_sock.local_addr()?.port();
 
