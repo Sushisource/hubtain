@@ -1,13 +1,16 @@
 mod client_approver;
-#[cfg(not(test))]
 mod tui;
 
 pub use client_approver::ClientApprover;
 
+use self::tui::ServerTui;
 use crate::{
     encrypted_stream::{EncStreamErr, ServerEncryptedStreamStarter},
+    filereader::AsyncFileReader,
     mnemonic::random_word,
     models::HandshakeReply,
+    server::client_approver::ConsoleApprover,
+    tui::TuiApprover,
 };
 use anyhow::{anyhow, Context, Error};
 use async_std::{
@@ -19,19 +22,11 @@ use bincode::serialize;
 use futures::io::AsyncRead;
 use rand::rngs::OsRng;
 use std::{
+    path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 use x25519_dalek::EphemeralSecret;
-
-#[cfg(not(test))]
-use self::tui::ServerTui;
-use crate::filereader::AsyncFileReader;
-#[cfg(test)]
-use crate::server::client_approver::ConsoleApprover;
-#[cfg(not(test))]
-use crate::tui::TuiApprover;
-use std::path::PathBuf;
 
 /// Can be set true to order the server to quit.
 pub static SHUTDOWN_FLAG: AtomicBool = AtomicBool::new(false);
@@ -56,22 +51,33 @@ impl<T> FileSrv<T>
 where
     T: 'static + AsyncRead + Send + Unpin + Clone,
 {
-    /// Begin listening for connections and serving data.
+    /// Begin listening for connections and serving data
+    ///
+    /// Also:
+    /// * Initialize the TUI if the terminal is a tty & using encryption & staying alive
     pub async fn serve(self) -> Result<(), Error> {
-        // TODO: Handle this better than compile flags
-        // TODO: Allow for a fallback cli mode for one-client too, and when tui not supported
-        #[cfg(not(test))]
-        let tui_handle = ServerTui::start(self.name.clone(), self.file_name.clone())?;
+        let approver: Box<dyn ClientApprover>;
+
+        let tui_handle = if self.client_approval_strategy == ClientApprovalStrategy::Interactive
+            && self.stay_alive
+        {
+            if !ServerTui::is_interactive() {
+                return Err(anyhow!(
+                    "Refusing to use interactive mode in non-tty terminal"
+                ));
+            }
+            let tui_handle = ServerTui::start(self.name.clone(), self.file_name.clone())?;
+            approver = Box::new(TuiApprover::new(tui_handle.tx.clone()));
+            Some(tui_handle)
+        } else {
+            approver = Box::new(ConsoleApprover::default());
+            None
+        };
 
         let tcp_port = self.tcp_sock.local_addr()?.port();
 
         self.udp_sock.set_broadcast(true)?;
         info!("UDP Listening on {}", self.udp_sock.local_addr()?);
-
-        #[cfg(test)]
-        let approver = Box::leak(Box::new(ConsoleApprover::default()));
-        #[cfg(not(test))]
-        let approver = Box::leak(Box::new(TuiApprover::new(tui_handle.tx.clone())));
 
         let data_handle = spawn(FileSrv::data_srv(
             self.tcp_sock,
@@ -83,7 +89,7 @@ where
                 EncryptionType::None
             },
             self.client_approval_strategy,
-            &*approver,
+            Box::leak(approver),
         ));
 
         // Wait for broadcast from peer
@@ -119,11 +125,11 @@ where
                 data_handle.await?;
                 break;
             }
-            info!("Done serving");
         }
 
-        #[cfg(not(test))]
-        tui_handle.join();
+        if let Some(t) = tui_handle {
+            t.join()
+        }
 
         Ok(())
     }
@@ -150,9 +156,9 @@ where
             info!("Accepted download connection from {:?}", &addr);
             let data_src = data.clone();
             let enctype = enctype.clone();
-            // TODO: On error, send message indicating client dropped to approver
             let h = spawn(async move {
                 let res = (|| async {
+                    let mut extra = String::new();
                     match enctype {
                         EncryptionType::Ephemeral => {
                             info!("Server handshaking");
@@ -166,6 +172,7 @@ where
                                     }
                                     e => e?,
                                 };
+                            extra = format!("to client {}", encrypted_stream.get_client_id());
                             futures::io::copy(data_src, &mut encrypted_stream)
                                 .await
                                 .context(format!(
@@ -179,6 +186,7 @@ where
                                 .context("Couldn't complete transfer to client")?;
                         }
                     }
+                    info!("Done serving {}", extra);
                     Ok(())
                 })()
                 .await;
@@ -202,10 +210,9 @@ enum EncryptionType {
     Ephemeral,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy)]
 pub enum ClientApprovalStrategy {
     Interactive,
-    #[cfg(test)]
     ApproveAll,
 }
 
@@ -250,7 +257,7 @@ impl FileSrvBuilder {
             stay_alive: false,
             encryption: false,
             listen_addr: DEFAULT_TCP_LISTEN_ADDR.to_string(),
-            client_approval_strategy: ClientApprovalStrategy::Interactive,
+            client_approval_strategy: ClientApprovalStrategy::ApproveAll,
         }
     }
 
@@ -264,13 +271,12 @@ impl FileSrvBuilder {
         self
     }
 
-    pub fn set_encryption(
-        mut self,
-        encryption: bool,
-        approval_strategy: ClientApprovalStrategy,
-    ) -> Self {
+    pub fn set_encryption(mut self, encryption: bool) -> Self {
         self.encryption = encryption;
-        self.client_approval_strategy = approval_strategy;
+        #[cfg(not(test))]
+        if encryption {
+            self.client_approval_strategy = ClientApprovalStrategy::Interactive;
+        }
         self
     }
 

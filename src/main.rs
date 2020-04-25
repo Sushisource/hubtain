@@ -17,14 +17,9 @@ mod filewriter;
 mod mnemonic;
 mod models;
 mod server;
-#[cfg(not(test))]
 mod tui;
 
-use crate::{
-    client::DownloadClient,
-    filereader::AsyncFileReader,
-    server::{ClientApprovalStrategy, FileSrvBuilder},
-};
+use crate::{client::DownloadClient, filereader::AsyncFileReader, server::FileSrvBuilder};
 use anyhow::{anyhow, Error};
 #[cfg(not(test))]
 use broadcast_addr_picker::select_broadcast_addr;
@@ -42,7 +37,7 @@ lazy_static! {
 
 #[cfg(test)]
 lazy_static! {
-    static ref BROADCAST_ADDR: IpAddr = { IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)) };
+    static ref BROADCAST_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 }
 
 #[async_std::main]
@@ -91,7 +86,7 @@ async fn main() -> Result<(), Error> {
             let fsrv = FileSrvBuilder::new(serv_file)
                 .set_udp_port(42444)
                 .set_stayalive(sc.is_present("stayalive"))
-                .set_encryption(encryption, ClientApprovalStrategy::Interactive)
+                .set_encryption(encryption)
                 .build()
                 .await?;
             fsrv.serve().await?;
@@ -130,7 +125,7 @@ mod test {
     use crate::{
         client::test_srvr_sel,
         filereader::AsyncFileReader,
-        server::{test_filesrv, ClientApprovalStrategy, FileSrvBuilder},
+        server::{test_filesrv, FileSrvBuilder},
     };
     use async_std::task::spawn;
     use std::{fs::File, io::Read};
@@ -179,7 +174,7 @@ mod test {
     async fn file_transfer_test(encryption: bool) {
         let test_file = AsyncFileReader::new("testdata/small.txt").unwrap();
         let fsrv = FileSrvBuilder::new(test_file)
-            .set_encryption(encryption, ClientApprovalStrategy::ApproveAll)
+            .set_encryption(encryption)
             .build()
             .await
             .unwrap();

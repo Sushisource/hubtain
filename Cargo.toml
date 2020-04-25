@@ -7,6 +7,7 @@ edition = "2018"
 [dependencies]
 async-std = { features = ["unstable", "attributes"], version = "1" }
 async-trait = "0.1"
+atty = "0.2.14"
 anyhow = "1.0"
 thiserror = "1.0"
 clap = "2"
@@ -25,8 +26,6 @@ x25519-dalek = "0.6"
 colored = "1"
 lazy_static = "1"
 tui = { version =  "0.9", features = ["crossterm"], default_features = false }
-# maybe remove
-hex = "0.4"
 derive_more = "0.99"
 
 [dev-dependencies]

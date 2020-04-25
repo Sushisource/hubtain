@@ -4,6 +4,7 @@ use crate::{
     tui::{event_forwarder, TermMsg, TuiLogger},
 };
 use anyhow::Error;
+use atty::Stream;
 use crossterm::{
     event::{Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
@@ -64,6 +65,10 @@ const LOG_SCROLLBACK: usize = 1000;
 
 // TODO: Use part of client approver line as percent complete
 impl ServerTui {
+    pub fn is_interactive() -> bool {
+        atty::is(Stream::Stdout)
+    }
+
     pub fn start(name: String, file_name: String) -> Result<TuiHandle, Error> {
         let (tx, rx) = sync_channel::<TermMsg>(100);
         let tui = ServerTui::new(name, rx, file_name);
@@ -201,11 +206,14 @@ impl ServerTui {
                 let items = List::new(items).block(logblock).style(style);
                 f.render_stateful_widget(items, chunks[0], &mut self.log_state);
 
-                let chop_id_at = chunks[1].width - 5;
-                let items = self
-                    .clients
-                    .iter()
-                    .map(|s| Text::styled(s.0.to_string().split_off(chop_id_at as usize), style));
+                let items = self.clients.iter().map(|s| {
+                    let mut client_id = s.0.to_string();
+                    let chop_id_at = chunks[1].width - 5;
+                    if chop_id_at > 5 {
+                        client_id.truncate(chop_id_at as usize);
+                    }
+                    Text::styled(client_id, style)
+                });
                 let items = List::new(items)
                     .block(client_block)
                     .style(style)

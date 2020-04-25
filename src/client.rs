@@ -131,7 +131,7 @@ impl DownloadClient {
         let stream = self.do_handshake().await?;
         Self::drain_downloaded_to_stream(&mut download, stream).await?;
         // Truncate any extra padding that may have been read
-        download.split_off(data_len);
+        download.truncate(data_len);
         Ok(download)
     }
 

@@ -121,9 +121,11 @@ where
         let their_pubkey: PublicKey = read_hs.pubkey.into();
 
         match approval_strat {
-            #[cfg(test)]
             ClientApprovalStrategy::ApproveAll => {
+                #[cfg(not(test))]
+                panic!("Approve all mode should never be enabled with encryption in production!");
                 // Send approval byte
+                #[cfg(test)]
                 self.underlying.write_all(&[1]).await?;
             }
             ClientApprovalStrategy::Interactive => {
@@ -282,7 +284,7 @@ where
                 [self.read_remainder.as_slice(), read_buf.as_slice()].concat();
             // Drop portion of the buffer which is just useless zero padding, if any.
             let useless_buffer_bytes = read_buf.len() - *bytes_read;
-            remainder_plus_read.split_off(remainder_plus_read.len() - useless_buffer_bytes);
+            remainder_plus_read.truncate(remainder_plus_read.len() - useless_buffer_bytes);
             let written = self.read_packets_from_buffer(&mut remainder_plus_read, buf);
             if written == 0 {
                 cx.waker().wake_by_ref();
