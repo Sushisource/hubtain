@@ -33,7 +33,7 @@ use colored::Colorize;
 use log::LevelFilter;
 #[cfg(test)]
 use std::net::Ipv4Addr;
-use std::{net::IpAddr, path::PathBuf};
+use std::{io::Write, net::IpAddr, path::PathBuf};
 
 #[cfg(not(test))]
 lazy_static! {
@@ -98,7 +98,19 @@ async fn main() -> Result<(), Error> {
         }
         ("fetch", Some(sc)) => {
             // TODO: Interactive server selector / tui
-            env_logger::builder().filter_level(LevelFilter::Info).init();
+            env_logger::builder()
+                .filter_level(LevelFilter::Info)
+                .format(|buf, record| {
+                    writeln!(
+                        buf,
+                        "[{} {}] {}",
+                        buf.default_level_style(record.level())
+                            .value(record.level()),
+                        buf.timestamp_seconds(),
+                        record.args()
+                    )
+                })
+                .init();
             let client = DownloadClient::connect(42444, |_| true).await?;
             let file_path = sc
                 .value_of("FILE")
