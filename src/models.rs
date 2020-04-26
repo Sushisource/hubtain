@@ -1,5 +1,9 @@
 use serde::{export::Formatter, Deserialize, Serialize};
-use std::fmt::{self, Debug, Display};
+use std::{
+    collections::hash_map::DefaultHasher,
+    fmt::{self, Debug, Display},
+    hash::{Hash, Hasher},
+};
 
 #[derive(Serialize, Deserialize)]
 pub struct HandshakeReply {
@@ -17,7 +21,10 @@ pub struct ClientId {
 
 impl Display for ClientId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", mnemonic::to_string(self.pubkey))
+        let mut s = DefaultHasher::new();
+        self.pubkey.hash(&mut s);
+        let hashed_key = s.finish();
+        write!(f, "{}", mnemonic::to_string(hashed_key.to_le_bytes()))
     }
 }
 

@@ -1,5 +1,5 @@
-use crate::models::ClientId;
 use crate::{
+    models::ClientId,
     server::SHUTDOWN_FLAG,
     tui::{event_forwarder, TermMsg, TuiLogger},
 };
@@ -125,9 +125,6 @@ impl ServerTui {
                                 // Client approved, remove it
                                 self.clients_state.selected().map(|i| {
                                     self.clients.remove(i).map(|(name, tx)| {
-                                        // TODO: Find a way to shorten names more, or
-                                        //  wait for wrapping supprt or something else. Same
-                                        //  for in approver window.
                                         info!("Client downloading: {}", name);
                                         tx.send(true)
                                     })

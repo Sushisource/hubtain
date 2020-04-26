@@ -5,12 +5,12 @@ use crate::{
 use anyhow::Error;
 use crossterm::event::{self, Event};
 use log::{LevelFilter, Log, Metadata, Record};
-use std::sync::Once;
 use std::{
     io::Write,
     sync::{
         atomic::Ordering,
         mpsc::{channel, Sender, SyncSender},
+        Once,
     },
     time::Duration,
 };

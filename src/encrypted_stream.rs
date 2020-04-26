@@ -1,11 +1,13 @@
-//! Defines write and read halfs of async streams that can perform encryption.
+//! Defines write and read halves of async streams that can perform encryption.
 //!
 //! Probably doing the encryption/decryption inside the poll() functions is less than ideal
 //! given it may take long enough to count as blocking - but it does make for an easy-to-use
 //! interface and is plenty fast in practice.
 
-use crate::models::ClientId;
-use crate::server::{ClientApprovalStrategy, ClientApprover};
+use crate::{
+    models::ClientId,
+    server::{ClientApprovalStrategy, ClientApprover},
+};
 use anyhow::{anyhow, Context as AnyhowCtx};
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use ring::aead::{
@@ -55,6 +57,7 @@ where
     /// data.
     pub async fn key_exchange(mut self) -> Result<EncryptedReadStream<'a, S>, EncStreamErr> {
         let pubkey = PublicKey::from(&self.secret);
+        info!("Your client id is: {}", ClientId::new(*pubkey.as_bytes()));
         let outgoing_hs = Handshake {
             pubkey: *pubkey.as_bytes(),
         };
