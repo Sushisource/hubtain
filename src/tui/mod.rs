@@ -5,6 +5,7 @@ use crate::{
 use anyhow::Error;
 use crossterm::event::{self, Event};
 use log::{LevelFilter, Log, Metadata, Record};
+use std::sync::Once;
 use std::{
     io::Write,
     sync::{
@@ -14,21 +15,25 @@ use std::{
     time::Duration,
 };
 
+static LOGGER_INITTED: Once = Once::new();
+
 /// Initializes a console logger for non-tui mode
 pub fn init_console_logger() {
-    env_logger::builder()
-        .filter_level(LevelFilter::Info)
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "[{} {}] {}",
-                buf.default_level_style(record.level())
-                    .value(record.level()),
-                buf.timestamp_seconds(),
-                record.args()
-            )
-        })
-        .init();
+    LOGGER_INITTED.call_once(|| {
+        env_logger::builder()
+            .filter_level(LevelFilter::Info)
+            .format(|buf, record| {
+                writeln!(
+                    buf,
+                    "[{} {}] {}",
+                    buf.default_level_style(record.level())
+                        .value(record.level()),
+                    buf.timestamp_seconds(),
+                    record.args()
+                )
+            })
+            .init();
+    })
 }
 
 #[derive(Debug)]
