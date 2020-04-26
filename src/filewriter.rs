@@ -1,8 +1,13 @@
 use anyhow::Error;
 use futures::{io::AsyncWrite, task::Context};
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::{fs::File, io, io::Write, path::Path, pin::Pin, sync::atomic::AtomicUsize, task::Poll};
+use std::{
+    fs::File,
+    io::{self, Write},
+    path::Path,
+    pin::Pin,
+    sync::{atomic::AtomicUsize, atomic::Ordering, Arc},
+    task::Poll,
+};
 
 pub struct AsyncFileWriter {
     file: File,

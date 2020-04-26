@@ -162,7 +162,7 @@ where
             let h = spawn(async move {
                 let res = (|| async {
                     let mut extra = String::new();
-                    match enctype {
+                    let wstream = match enctype {
                         EncryptionType::Ephemeral => {
                             info!("Server handshaking");
                             let secret = EphemeralSecret::new(&mut OsRng);
@@ -184,10 +184,11 @@ where
                                 ))?;
                         }
                         EncryptionType::None => {
-                            futures::io::copy(data_src, &mut stream)
-                                .await
-                                .context("Couldn't complete transfer to client")?;
+                            &mut stream
                         }
+                        futures::io::copy(data_src, &mut wstream)
+                        .await
+                        .context("Couldn't complete transfer to client")?;
                     }
                     info!("Done serving {}", extra);
                     Ok(())

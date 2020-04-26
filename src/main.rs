@@ -16,6 +16,7 @@ mod filereader;
 mod filewriter;
 mod mnemonic;
 mod models;
+mod progresswriter;
 mod server;
 mod tui;
 
@@ -93,7 +94,7 @@ async fn main() -> Result<(), Error> {
             fsrv.serve().await?;
         }
         ("fetch", Some(sc)) => {
-            // TODO: Interactive server selector / tui
+            // TODO: Interactive server selector? tui?
             init_console_logger();
             let client = DownloadClient::connect(42444, |_| true).await?;
             let file_path = sc
