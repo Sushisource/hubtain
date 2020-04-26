@@ -1,15 +1,35 @@
-use crate::models::ClientId;
-use crate::server::{ClientApprover, SHUTDOWN_FLAG};
+use crate::{
+    models::ClientId,
+    server::{ClientApprover, SHUTDOWN_FLAG},
+};
 use anyhow::Error;
 use crossterm::event::{self, Event};
-use log::{Log, Metadata, Record};
+use log::{LevelFilter, Log, Metadata, Record};
 use std::{
+    io::Write,
     sync::{
         atomic::Ordering,
         mpsc::{channel, Sender, SyncSender},
     },
     time::Duration,
 };
+
+/// Initializes a console logger for non-tui mode
+pub fn init_console_logger() {
+    env_logger::builder()
+        .filter_level(LevelFilter::Info)
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "[{} {}] {}",
+                buf.default_level_style(record.level())
+                    .value(record.level()),
+                buf.timestamp_seconds(),
+                record.args()
+            )
+        })
+        .init();
+}
 
 #[derive(Debug)]
 pub enum TermMsg {

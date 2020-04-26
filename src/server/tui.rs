@@ -232,3 +232,9 @@ impl ServerTui {
         Ok(())
     }
 }
+
+impl Drop for ServerTui {
+    fn drop(&mut self) {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+}

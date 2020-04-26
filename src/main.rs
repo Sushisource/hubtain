@@ -19,16 +19,18 @@ mod models;
 mod server;
 mod tui;
 
-use crate::{client::DownloadClient, filereader::AsyncFileReader, server::FileSrvBuilder};
+use crate::{
+    client::DownloadClient, filereader::AsyncFileReader, server::FileSrvBuilder,
+    tui::init_console_logger,
+};
 use anyhow::{anyhow, Error};
 #[cfg(not(test))]
 use broadcast_addr_picker::select_broadcast_addr;
 use clap::AppSettings;
 use colored::Colorize;
-use log::LevelFilter;
 #[cfg(test)]
 use std::net::Ipv4Addr;
-use std::{io::Write, net::IpAddr, path::PathBuf};
+use std::{net::IpAddr, path::PathBuf};
 
 #[cfg(not(test))]
 lazy_static! {
@@ -80,7 +82,6 @@ async fn main() -> Result<(), Error> {
     match matches.subcommand() {
         ("srv", Some(sc)) => {
             let file_path = sc.value_of("FILE").expect("file arg is required");
-            info!("Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
             let encryption = !sc.is_present("no_encryption");
             let fsrv = FileSrvBuilder::new(serv_file)
@@ -93,19 +94,7 @@ async fn main() -> Result<(), Error> {
         }
         ("fetch", Some(sc)) => {
             // TODO: Interactive server selector / tui
-            env_logger::builder()
-                .filter_level(LevelFilter::Info)
-                .format(|buf, record| {
-                    writeln!(
-                        buf,
-                        "[{} {}] {}",
-                        buf.default_level_style(record.level())
-                            .value(record.level()),
-                        buf.timestamp_seconds(),
-                        record.args()
-                    )
-                })
-                .init();
+            init_console_logger();
             let client = DownloadClient::connect(42444, |_| true).await?;
             let file_path = sc
                 .value_of("FILE")

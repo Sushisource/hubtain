@@ -10,7 +10,7 @@ use crate::{
     mnemonic::random_word,
     models::HandshakeReply,
     server::client_approver::ConsoleApprover,
-    tui::TuiApprover,
+    tui::{init_console_logger, TuiApprover},
 };
 use anyhow::{anyhow, Context, Error};
 use async_std::{
@@ -70,9 +70,13 @@ where
             approver = Box::new(TuiApprover::new(tui_handle.tx.clone()));
             Some(tui_handle)
         } else {
+            init_console_logger();
+            info!("TUI not enabled");
             approver = Box::new(ConsoleApprover::default());
             None
         };
+
+        info!("Serving file {}", &self.file_name);
 
         let tcp_port = self.tcp_sock.local_addr()?.port();
 
