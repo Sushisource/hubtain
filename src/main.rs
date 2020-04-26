@@ -223,13 +223,12 @@ mod test {
 
     #[cfg(feature = "expensive_tests")]
     #[async_std::test]
-    fn large_file_transfer() {
+    async fn large_file_transfer() {
         use std::time::Instant;
 
         let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
-        let file_siz = test_file.file_size;
-        let fsrv = FileSrvBuilder::new(test_file, file_siz)
-            .set_encryption(true, ClientApprovalStrategy::ApproveAll)
+        let fsrv = FileSrvBuilder::new(test_file)
+            .set_encryption(true)
             .build()
             .await
             .unwrap();

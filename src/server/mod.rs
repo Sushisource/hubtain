@@ -71,7 +71,6 @@ where
             Some(tui_handle)
         } else {
             init_console_logger();
-            info!("TUI not enabled");
             approver = Box::new(ConsoleApprover::default());
             None
         };
