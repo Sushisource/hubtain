@@ -20,6 +20,7 @@ use async_std::{
 };
 use bincode::serialize;
 use futures::io::AsyncRead;
+use futures::AsyncWrite;
 use rand::rngs::OsRng;
 use std::{
     path::PathBuf,
@@ -162,12 +163,13 @@ where
             let h = spawn(async move {
                 let res = (|| async {
                     let mut extra = String::new();
-                    let wstream = match enctype {
+                    let mut ec;
+                    let mut wstream: &mut (dyn AsyncWrite + Unpin + Send) = match enctype {
                         EncryptionType::Ephemeral => {
                             info!("Server handshaking");
                             let secret = EphemeralSecret::new(&mut OsRng);
                             let enc_stream = ServerEncryptedStreamStarter::new(&mut stream, secret);
-                            let mut encrypted_stream =
+                            let encrypted_stream =
                                 match enc_stream.key_exchange(client_strat, approver).await {
                                     Ok(es) => es,
                                     Err(EncStreamErr::ClientNotAccepted) => {
@@ -176,20 +178,14 @@ where
                                     e => e?,
                                 };
                             extra = format!("to client {}", encrypted_stream.get_client_id());
-                            futures::io::copy(data_src, &mut encrypted_stream)
-                                .await
-                                .context(format!(
-                                    "Couldn't complete transfer to client {}",
-                                    encrypted_stream.get_client_id(),
-                                ))?;
+                            ec = encrypted_stream;
+                            &mut ec
                         }
-                        EncryptionType::None => {
-                            &mut stream
-                        }
-                        futures::io::copy(data_src, &mut wstream)
+                        EncryptionType::None => &mut stream,
+                    };
+                    futures::io::copy(data_src, &mut wstream)
                         .await
                         .context("Couldn't complete transfer to client")?;
-                    }
                     info!("Done serving {}", extra);
                     Ok(())
                 })()
