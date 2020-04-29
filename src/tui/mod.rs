@@ -2,16 +2,17 @@ use crate::{
     models::ClientId,
     server::{ClientApprover, SHUTDOWN_FLAG},
 };
-use anyhow::Error;
+use anyhow::{anyhow, Error};
 use crossterm::event::{self, Event};
+use futures::{
+    channel::mpsc::{channel, Sender},
+    executor::block_on,
+    SinkExt, StreamExt,
+};
 use log::{LevelFilter, Log, Metadata, Record};
 use std::{
     io::Write,
-    sync::{
-        atomic::Ordering,
-        mpsc::{channel, Sender, SyncSender},
-        Once,
-    },
+    sync::{atomic::Ordering, Once},
     time::Duration,
 };
 
@@ -45,7 +46,7 @@ pub enum TermMsg {
 
 #[derive(Constructor)]
 pub struct TuiLogger {
-    tx: SyncSender<TermMsg>,
+    tx: Sender<TermMsg>,
 }
 
 impl Log for TuiLogger {
@@ -54,9 +55,11 @@ impl Log for TuiLogger {
     }
 
     fn log(&self, record: &Record<'_>) {
+        // TODO: Clone? Hmm?
         self.tx
-            .send(TermMsg::Log(record.args().to_string()))
-            .expect("Logger can't write");
+            .clone()
+            .try_send(TermMsg::Log(record.args().to_string()))
+            .expect("Logger can't write")
     }
 
     fn flush(&self) {}
@@ -65,31 +68,32 @@ impl Log for TuiLogger {
 /// Approver for use with the TUI
 #[derive(Constructor)]
 pub struct TuiApprover {
-    tx: SyncSender<TermMsg>,
+    tx: Sender<TermMsg>,
 }
 
 #[async_trait::async_trait]
 impl ClientApprover for TuiApprover {
     async fn submit(&self, client_id: ClientId) -> Result<bool, Error> {
-        // TODO: Unclear if async_std is actually handling this or if block_in_place needs
-        //  to be stabilized
-        let (tx, rx) = channel();
+        let (tx, mut rx) = channel(8);
         self.tx
+            .clone()
             .send(TermMsg::ClientRequest(client_id, tx))
-            .expect("Couldn't send client");
-        Ok(rx.recv()?)
+            .await?;
+        rx.next()
+            .await
+            .ok_or_else(|| anyhow!("No reply to client request"))
     }
 }
 
 /// Can be run in it's own thread to forward crossterm events to the TUI
-pub fn event_forwarder(tx: SyncSender<TermMsg>) -> crossterm::Result<()> {
+pub fn event_forwarder(mut tx: Sender<TermMsg>) -> crossterm::Result<()> {
     loop {
         if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
             break Ok(());
         }
         if event::poll(Duration::from_millis(100))? {
-            tx.send(TermMsg::Input(event::read()?))
-                .expect("Must be able to forward result");
+            block_on(tx.send(TermMsg::Input(event::read()?)))
+                .expect("Must be able to forward event");
         }
     }
 }
