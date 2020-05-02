@@ -4,11 +4,12 @@ mod tui;
 pub use client_approver::ClientApprover;
 
 use self::tui::ServerTui;
+use crate::models::DataSrvInfo;
 use crate::{
     encrypted_stream::{EncStreamErr, ServerEncryptedStreamStarter},
     filereader::AsyncFileReader,
     mnemonic::random_word,
-    models::HandshakeReply,
+    models::DiscoveryReply,
     server::client_approver::ConsoleApprover,
     tui::{init_console_logger, TuiApprover},
 };
@@ -85,13 +86,17 @@ where
 
         let data_handle = spawn(FileSrv::data_srv(
             self.tcp_sock,
-            self.data,
-            self.stay_alive,
-            if self.encrypted {
-                EncryptionType::Ephemeral
-            } else {
-                EncryptionType::None
+            ServerData {
+                data: self.data,
+                data_length: self.data_length,
+                enctype: if self.encrypted {
+                    EncryptionType::Ephemeral
+                } else {
+                    EncryptionType::None
+                },
+                data_name: self.file_name,
             },
+            self.stay_alive,
             self.client_approval_strategy,
             Box::leak(approver),
         ));
@@ -117,12 +122,9 @@ where
             }?;
             info!("Client ping from {}", &peer);
             // Reply with name and tcp portnum
-            let initial_info = serialize(&HandshakeReply {
+            let initial_info = serialize(&DiscoveryReply {
                 server_name: self.name.clone(),
                 tcp_port,
-                data_length: self.data_length,
-                encrypted: self.encrypted,
-                file_name: self.file_name.clone(),
             })?;
             self.udp_sock.send_to(&initial_info, &peer).await?;
             if !self.stay_alive {
@@ -148,18 +150,27 @@ where
     /// transferring data to clients.
     async fn data_srv(
         tcp_sock: TcpListener,
-        data: T,
+        server_data: ServerData<T>,
         stay_alive: bool,
-        enctype: EncryptionType,
         client_strat: ClientApprovalStrategy,
         approver: &'static dyn ClientApprover,
     ) -> Result<(), Error> {
-        info!("TCP listening on {}", tcp_sock.local_addr()?);
+        let local_addr = tcp_sock.local_addr()?;
+        info!("TCP listening on {}", local_addr);
         loop {
             let (mut stream, addr) = tcp_sock.accept().await?;
             info!("Accepted download connection from {:?}", &addr);
-            let data_src = data.clone();
-            let enctype = enctype.clone();
+            // Send the client some info first
+            let info = DataSrvInfo {
+                tcp_port: local_addr.port(),
+                data_length: server_data.data_length,
+                encrypted: server_data.enctype != EncryptionType::None,
+                data_name: server_data.data_name.clone(),
+            };
+            info.write_to_stream(&mut stream).await?;
+
+            let data_src = server_data.data.clone();
+            let enctype = server_data.enctype;
             let h = spawn(async move {
                 let res = (|| async {
                     let mut extra = String::new();
@@ -204,7 +215,14 @@ where
     }
 }
 
-#[derive(Clone)]
+struct ServerData<T> {
+    data: T,
+    data_length: u64,
+    data_name: String,
+    enctype: EncryptionType,
+}
+
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Copy)]
 enum EncryptionType {
     None,
     Ephemeral,

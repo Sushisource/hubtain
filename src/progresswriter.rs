@@ -14,10 +14,10 @@ pub struct ProgressWriter<W> {
 }
 
 impl<W> ProgressWriter<W> {
-    /// Returns the number of bytes that have been written to the stream so far
-    pub fn get_written(&self) -> usize {
-        self.bytes_writen.load(Ordering::SeqCst)
-    }
+    // / Returns the number of bytes that have been written to the stream so far
+    // pub fn get_written(&self) -> usize {
+    //     self.bytes_writen.load(Ordering::SeqCst)
+    // }
 }
 
 impl<W> AsyncWrite for ProgressWriter<W>

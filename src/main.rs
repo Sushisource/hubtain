@@ -58,8 +58,10 @@ async fn main() -> Result<(), Error> {
         )
         (@subcommand fetch =>
             (about: "Client download mode")
-            (@arg FILE: "Where to save the downloaded file. Defaults to a file in the current \
-                         directory, named by the server it's downloaded from.")
+            (@arg SERVER_URL: "Rather than searching for a local server, directly connect to the \
+                               provided IP/DNS and port combination")
+            (@arg file: -o "Where to save the downloaded file. Defaults to a file in the current \
+                            directory, named by the server it's downloaded from.")
         )
     )
     .setting(AppSettings::SubcommandRequiredElseHelp)
@@ -96,7 +98,11 @@ async fn main() -> Result<(), Error> {
         ("fetch", Some(sc)) => {
             // TODO: Interactive server selector? tui?
             init_console_logger();
-            let client = DownloadClient::connect(42444, |_| true).await?;
+            let client = if let Some(server_url) = sc.value_of("SERVER_URL") {
+                DownloadClient::connect(server_url.parse()?).await?
+            } else {
+                DownloadClient::find_server(42444, |_| true).await?
+            };
             let file_path = sc
                 .value_of("FILE")
                 .map(Into::into)
@@ -129,7 +135,7 @@ mod test {
         let udp_port = fsrv.udp_port().unwrap();
         let server_f = spawn(fsrv.serve());
 
-        let client = DownloadClient::connect(udp_port, test_srvr_sel)
+        let client = DownloadClient::find_server(udp_port, test_srvr_sel)
             .await
             .unwrap();
         let content = client.download_to_vec().await.unwrap();
@@ -143,7 +149,7 @@ mod test {
         let udp_port = fsrv.udp_port().unwrap();
         let server_f = spawn(fsrv.serve());
 
-        let client = DownloadClient::connect(udp_port, test_srvr_sel)
+        let client = DownloadClient::find_server(udp_port, test_srvr_sel)
             .await
             .unwrap();
         let content = client.download_to_vec().await.unwrap();
@@ -170,7 +176,7 @@ mod test {
             .unwrap();
         let udp_port = fsrv.udp_port().unwrap();
         let server_f = spawn(fsrv.serve());
-        let client = DownloadClient::connect(udp_port, test_srvr_sel)
+        let client = DownloadClient::find_server(udp_port, test_srvr_sel)
             .await
             .unwrap();
         let download_to = NamedTempFile::new().unwrap();
@@ -204,7 +210,7 @@ mod test {
         let _ = spawn(fsrv.serve());
 
         let dl_futures = (1..100).map(async move |_| {
-            let client = DownloadClient::connect(udp_port, test_srvr_sel)
+            let client = DownloadClient::find_server(udp_port, test_srvr_sel)
                 .await
                 .unwrap();
             client.download_to_vec().await
@@ -236,7 +242,7 @@ mod test {
         let udp_port = fsrv.udp_port().unwrap();
         let _ = spawn(fsrv.serve());
 
-        let client = DownloadClient::connect(udp_port, test_srvr_sel)
+        let client = DownloadClient::find_server(udp_port, test_srvr_sel)
             .await
             .unwrap();
         let start = Instant::now();
