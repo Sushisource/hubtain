@@ -1,5 +1,5 @@
-use crate::models::ClientId;
 use crate::{
+    models::ClientId,
     server::SHUTDOWN_FLAG,
     tui::{event_forwarder, TermMsg, TuiLogger},
 };
@@ -10,14 +10,16 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
+use futures::{
+    channel::mpsc::{channel, Receiver, Sender},
+    executor::block_on,
+    StreamExt,
+};
 use log::LevelFilter;
 use std::{
     collections::VecDeque,
     io::{self, stdout, Write},
-    sync::{
-        atomic::Ordering,
-        mpsc::{sync_channel, Receiver, Sender, SyncSender},
-    },
+    sync::atomic::Ordering,
     thread::JoinHandle,
 };
 use tui::{
@@ -39,7 +41,7 @@ pub struct ServerTui {
 }
 
 pub struct TuiHandle {
-    pub tx: SyncSender<TermMsg>,
+    pub tx: Sender<TermMsg>,
     render_thread: JoinHandle<io::Result<()>>,
     event_thread: JoinHandle<crossterm::Result<()>>,
 }
@@ -70,7 +72,7 @@ impl ServerTui {
     }
 
     pub fn start(name: String, file_name: String) -> Result<TuiHandle, Error> {
-        let (tx, rx) = sync_channel::<TermMsg>(100);
+        let (tx, rx) = channel::<TermMsg>(100);
         let tui = ServerTui::new(name, rx, file_name);
         let txc = tx.clone();
         log::set_logger(Box::leak(Box::new(TuiLogger::new(txc))))
@@ -117,27 +119,24 @@ impl ServerTui {
         }
 
         loop {
-            match self.rx.recv() {
-                Ok(TermMsg::Input(i)) => {
+            match block_on(self.rx.next()) {
+                Some(TermMsg::Input(i)) => {
                     if let Event::Key(KeyEvent { code, modifiers }) = i {
                         match code {
                             KeyCode::Enter => {
                                 // Client approved, remove it
                                 self.clients_state.selected().map(|i| {
-                                    self.clients.remove(i).map(|(name, tx)| {
-                                        // TODO: Find a way to shorten names more, or
-                                        //  wait for wrapping supprt or something else. Same
-                                        //  for in approver window.
+                                    self.clients.remove(i).map(|(name, mut tx)| {
                                         info!("Client downloading: {}", name);
-                                        tx.send(true)
+                                        tx.try_send(true)
                                     })
                                 });
                             }
                             KeyCode::Char('n') => {
                                 // Client denied, remove it
-                                self.clients_state
-                                    .selected()
-                                    .map(|i| self.clients.remove(i).map(|(_, tx)| tx.send(false)));
+                                self.clients_state.selected().map(|i| {
+                                    self.clients.remove(i).map(|(_, mut tx)| tx.try_send(false))
+                                });
                             }
                             // TODO: Arrow keys broken in raw mode
                             KeyCode::Char('k') => {
@@ -169,19 +168,16 @@ impl ServerTui {
                         }
                     }
                 }
-                Ok(TermMsg::Log(s)) => {
+                Some(TermMsg::Log(s)) => {
                     self.logs.push_back(s);
                     if self.logs.len() > LOG_SCROLLBACK {
                         self.logs.pop_front();
                     }
                 }
-                Ok(TermMsg::ClientRequest(c, reply)) => {
+                Some(TermMsg::ClientRequest(c, reply)) => {
                     self.clients.push_back((c, reply));
                 }
-                Err(e) => {
-                    // TODO: This won't display. Probably need log file or something.
-                    error!("Problem receiving in UI loop: {:?}", e)
-                }
+                None => panic!("Ui loop channel died"),
             };
 
             terminal.draw(|mut f| {
@@ -230,5 +226,11 @@ impl ServerTui {
         terminal.clear()?;
 
         Ok(())
+    }
+}
+
+impl Drop for ServerTui {
+    fn drop(&mut self) {
+        let _ = crossterm::terminal::disable_raw_mode();
     }
 }

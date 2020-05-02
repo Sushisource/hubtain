@@ -16,19 +16,22 @@ mod filereader;
 mod filewriter;
 mod mnemonic;
 mod models;
+mod progresswriter;
 mod server;
 mod tui;
 
-use crate::{client::DownloadClient, filereader::AsyncFileReader, server::FileSrvBuilder};
+use crate::{
+    client::DownloadClient, filereader::AsyncFileReader, server::FileSrvBuilder,
+    tui::init_console_logger,
+};
 use anyhow::{anyhow, Error};
 #[cfg(not(test))]
 use broadcast_addr_picker::select_broadcast_addr;
 use clap::AppSettings;
 use colored::Colorize;
-use log::LevelFilter;
 #[cfg(test)]
 use std::net::Ipv4Addr;
-use std::{io::Write, net::IpAddr, path::PathBuf};
+use std::{net::IpAddr, path::PathBuf};
 
 #[cfg(not(test))]
 lazy_static! {
@@ -80,7 +83,6 @@ async fn main() -> Result<(), Error> {
     match matches.subcommand() {
         ("srv", Some(sc)) => {
             let file_path = sc.value_of("FILE").expect("file arg is required");
-            info!("Serving file {}", &file_path);
             let serv_file = AsyncFileReader::new(file_path)?;
             let encryption = !sc.is_present("no_encryption");
             let fsrv = FileSrvBuilder::new(serv_file)
@@ -92,20 +94,8 @@ async fn main() -> Result<(), Error> {
             fsrv.serve().await?;
         }
         ("fetch", Some(sc)) => {
-            // TODO: Interactive server selector / tui
-            env_logger::builder()
-                .filter_level(LevelFilter::Info)
-                .format(|buf, record| {
-                    writeln!(
-                        buf,
-                        "[{} {}] {}",
-                        buf.default_level_style(record.level())
-                            .value(record.level()),
-                        buf.timestamp_seconds(),
-                        record.args()
-                    )
-                })
-                .init();
+            // TODO: Interactive server selector? tui?
+            init_console_logger();
             let client = DownloadClient::connect(42444, |_| true).await?;
             let file_path = sc
                 .value_of("FILE")
@@ -234,13 +224,12 @@ mod test {
 
     #[cfg(feature = "expensive_tests")]
     #[async_std::test]
-    fn large_file_transfer() {
+    async fn large_file_transfer() {
         use std::time::Instant;
 
         let test_file = AsyncFileReader::new("testdata/large.bin").unwrap();
-        let file_siz = test_file.file_size;
-        let fsrv = FileSrvBuilder::new(test_file, file_siz)
-            .set_encryption(true, ClientApprovalStrategy::ApproveAll)
+        let fsrv = FileSrvBuilder::new(test_file)
+            .set_encryption(true)
             .build()
             .await
             .unwrap();

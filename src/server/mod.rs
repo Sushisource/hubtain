@@ -10,7 +10,7 @@ use crate::{
     mnemonic::random_word,
     models::HandshakeReply,
     server::client_approver::ConsoleApprover,
-    tui::TuiApprover,
+    tui::{init_console_logger, TuiApprover},
 };
 use anyhow::{anyhow, Context, Error};
 use async_std::{
@@ -20,6 +20,7 @@ use async_std::{
 };
 use bincode::serialize;
 use futures::io::AsyncRead;
+use futures::AsyncWrite;
 use rand::rngs::OsRng;
 use std::{
     path::PathBuf,
@@ -70,9 +71,12 @@ where
             approver = Box::new(TuiApprover::new(tui_handle.tx.clone()));
             Some(tui_handle)
         } else {
+            init_console_logger();
             approver = Box::new(ConsoleApprover::default());
             None
         };
+
+        info!("Serving file {}", &self.file_name);
 
         let tcp_port = self.tcp_sock.local_addr()?.port();
 
@@ -159,12 +163,13 @@ where
             let h = spawn(async move {
                 let res = (|| async {
                     let mut extra = String::new();
-                    match enctype {
+                    let mut ec;
+                    let mut wstream: &mut (dyn AsyncWrite + Unpin + Send) = match enctype {
                         EncryptionType::Ephemeral => {
                             info!("Server handshaking");
                             let secret = EphemeralSecret::new(&mut OsRng);
                             let enc_stream = ServerEncryptedStreamStarter::new(&mut stream, secret);
-                            let mut encrypted_stream =
+                            let encrypted_stream =
                                 match enc_stream.key_exchange(client_strat, approver).await {
                                     Ok(es) => es,
                                     Err(EncStreamErr::ClientNotAccepted) => {
@@ -173,19 +178,14 @@ where
                                     e => e?,
                                 };
                             extra = format!("to client {}", encrypted_stream.get_client_id());
-                            futures::io::copy(data_src, &mut encrypted_stream)
-                                .await
-                                .context(format!(
-                                    "Couldn't complete transfer to client {}",
-                                    encrypted_stream.get_client_id(),
-                                ))?;
+                            ec = encrypted_stream;
+                            &mut ec
                         }
-                        EncryptionType::None => {
-                            futures::io::copy(data_src, &mut stream)
-                                .await
-                                .context("Couldn't complete transfer to client")?;
-                        }
-                    }
+                        EncryptionType::None => &mut stream,
+                    };
+                    futures::io::copy(data_src, &mut wstream)
+                        .await
+                        .context("Couldn't complete transfer to client")?;
                     info!("Done serving {}", extra);
                     Ok(())
                 })()
