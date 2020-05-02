@@ -1,8 +1,9 @@
 //! Defines write and read halfs of async streams that can perform encryption.
 //!
 //! Probably doing the encryption/decryption inside the poll() functions is less than ideal
-//! given it may take long enough to count as blocking - but it does make for an easy-to-use
-//! interface and is plenty fast in practice.
+//! since it could be considered blocking. I also think I could probably avoid some of the weird
+//! chunking/leftover bytes stuff. But this does make for an easy-to-use interface and is plenty
+//! fast in practice.
 
 use crate::models::ClientId;
 use crate::server::{ClientApprovalStrategy, ClientApprover};
