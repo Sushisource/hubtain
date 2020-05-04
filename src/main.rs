@@ -99,7 +99,7 @@ async fn main() -> Result<(), Error> {
             // TODO: Interactive server selector? tui?
             init_console_logger();
             let client = if let Some(server_url) = sc.value_of("SERVER_URL") {
-                DownloadClient::connect(server_url.parse()?).await?
+                DownloadClient::connect(server_url).await?
             } else {
                 DownloadClient::find_server(42444, |_| true).await?
             };

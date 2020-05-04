@@ -4,6 +4,7 @@ use crate::{
     models::DiscoveryReply, BROADCAST_ADDR,
 };
 use anyhow::{anyhow, Error};
+use async_std::net::ToSocketAddrs;
 use async_std::{
     future::{self, timeout},
     net::{TcpStream, UdpSocket},
@@ -65,7 +66,7 @@ impl DownloadClient {
         Self::connect(selected_server.addr).await
     }
 
-    pub async fn connect(server_addr: SocketAddr) -> Result<Self, Error> {
+    pub async fn connect<A: ToSocketAddrs>(server_addr: A) -> Result<Self, Error> {
         let stream = TcpStream::connect(server_addr).await?;
         info!(
             "Client on {:?} connected to server at {:?}!",
