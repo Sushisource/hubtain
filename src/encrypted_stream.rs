@@ -402,8 +402,8 @@ pub enum EncStreamErr {
 mod encrypted_stream_tests {
     use super::*;
     use crate::server::ConsoleApprover;
-    use async_std::os::unix::net::UnixStream;
-    use futures::{executor::block_on, future::join, io::Cursor};
+    use async_std::{os::unix::net::UnixStream, task::block_on};
+    use futures::{future::join, io::Cursor};
     use rand::rngs::OsRng;
     use test::Bencher;
 
@@ -417,14 +417,15 @@ mod encrypted_stream_tests {
 
         join(server_task, client_task).await;
     }
+
     #[bench]
     fn full_small_encrypted_transfer_with_exchange(b: &mut Bencher) {
         b.iter(|| {
             block_on(async {
-                let test_data = &b"Oh boy what fun data to send!".repeat(10);
+                let test_data = &b"Oh boy what fun data to send!".repeat(100);
                 let (server_sock, mut client_sock) = UnixStream::pair().unwrap();
 
-                let server_task = server_task(&test_data, server_sock);
+                let server_task = server_task(test_data, server_sock);
                 let client_task = client_task(&mut client_sock);
 
                 join(server_task, client_task).await;
