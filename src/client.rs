@@ -117,7 +117,7 @@ impl DownloadClient {
             as_fwriter.bytes_writen.load(Ordering::Relaxed),
         );
         drop(as_fwriter);
-        // Truncate any extra padding that may have been read
+        // Truncate any extra padding that may exist
         OpenOptions::new()
             .write(true)
             .open(path)?
@@ -137,7 +137,7 @@ impl DownloadClient {
             Box::pin(self.stream)
         };
         Self::drain_downloaded_to_stream(&mut download, stream).await?;
-        // Truncate any extra padding that may have been read
+        // Truncate any extra padding that might be left over from vec capacity
         download.truncate(info.data_length as usize);
         Ok(download)
     }

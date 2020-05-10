@@ -8,12 +8,15 @@ extern crate lazy_static;
 extern crate derive_more;
 #[macro_use]
 extern crate log;
+#[cfg(test)]
+extern crate test;
 
 mod broadcast_addr_picker;
 mod client;
 mod encrypted_stream;
 mod filereader;
 mod filewriter;
+mod igd;
 mod mnemonic;
 mod models;
 mod progresswriter;
@@ -55,6 +58,9 @@ async fn main() -> Result<(), Error> {
             (@arg no_encryption: -n --("no-encryption") "Disable encryption")
             (@arg stayalive: -s --stayalive "Server stays alive indefinitely rather than stopping \
                                              after serving one file")
+            (@arg igd: -g --igd "Uses the UPnP IGD protocol to ask your router to map an external \
+                                 address and port back to this computer. Likely to fail if you \
+                                 are more than one hop away from the router.")
         )
         (@subcommand fetch =>
             (about: "Client download mode")
@@ -64,7 +70,7 @@ async fn main() -> Result<(), Error> {
                             directory, named by the server it's downloaded from.")
         )
     )
-    .setting(AppSettings::SubcommandRequiredElseHelp)
+    .settings(&[AppSettings::SubcommandRequiredElseHelp])
     .get_matches();
 
     // Gotta have that sweet banner
@@ -91,6 +97,7 @@ async fn main() -> Result<(), Error> {
                 .set_udp_port(42444)
                 .set_stayalive(sc.is_present("stayalive"))
                 .set_encryption(encryption)
+                .set_igd(sc.is_present("igd"))
                 .build()
                 .await?;
             fsrv.serve().await?;
@@ -116,7 +123,7 @@ async fn main() -> Result<(), Error> {
 }
 
 #[cfg(test)]
-mod test {
+mod main_test {
     use super::*;
     use crate::{
         client::test_srvr_sel,

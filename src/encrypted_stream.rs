@@ -397,3 +397,61 @@ pub enum EncStreamErr {
         source: anyhow::Error,
     },
 }
+
+#[cfg(test)]
+mod encrypted_stream_tests {
+    use super::*;
+    use crate::server::ConsoleApprover;
+    use async_std::os::unix::net::UnixStream;
+    use futures::{executor::block_on, future::join, io::Cursor};
+    use rand::rngs::OsRng;
+    use test::Bencher;
+
+    #[async_std::test]
+    async fn encrypted_copy_works() {
+        let test_data = &b"Oh boy what fun data to send!".repeat(100);
+        let (server_sock, mut client_sock) = UnixStream::pair().unwrap();
+
+        let server_task = server_task(test_data, server_sock);
+        let client_task = client_task(&mut client_sock);
+
+        join(server_task, client_task).await;
+    }
+    #[bench]
+    fn full_small_encrypted_transfer_with_exchange(b: &mut Bencher) {
+        b.iter(|| {
+            block_on(async {
+                let test_data = &b"Oh boy what fun data to send!".repeat(10);
+                let (server_sock, mut client_sock) = UnixStream::pair().unwrap();
+
+                let server_task = server_task(&test_data, server_sock);
+                let client_task = client_task(&mut client_sock);
+
+                join(server_task, client_task).await;
+            })
+        })
+    }
+
+    #[inline]
+    async fn server_task(test_data: &[u8], mut server_sock: UnixStream) {
+        let data_src = Cursor::new(test_data);
+        let secret = EphemeralSecret::new(&mut OsRng);
+        let server_stream = ServerEncryptedStreamStarter::new(&mut server_sock, secret);
+        let ca = ConsoleApprover::default();
+        let mut enc_stream = server_stream
+            .key_exchange(ClientApprovalStrategy::ApproveAll, &ca)
+            .await
+            .unwrap();
+        futures::io::copy(data_src, &mut enc_stream).await.unwrap();
+    }
+
+    #[inline]
+    async fn client_task(mut client_sock: &mut UnixStream) -> Vec<u8> {
+        let mut data_sink = Cursor::new(vec![]);
+        let secret = EphemeralSecret::new(&mut OsRng);
+        let enc_stream = ClientEncryptedStreamStarter::new(&mut client_sock, secret);
+        let enc_stream = enc_stream.key_exchange().await.unwrap();
+        futures::io::copy(enc_stream, &mut data_sink).await.unwrap();
+        data_sink.into_inner()
+    }
+}

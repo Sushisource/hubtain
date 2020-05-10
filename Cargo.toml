@@ -10,8 +10,8 @@ async-trait = "0.1"
 atty = "0.2.14"
 anyhow = "1.0"
 thiserror = "1.0"
-clap = "2"
 crossterm = "0.17"
+igd = "0.10"
 indicatif = "0.14"
 env_logger = "0.7"
 futures = "0.3"
@@ -28,8 +28,17 @@ lazy_static = "1"
 tui = { version =  "0.9", features = ["crossterm"], default_features = false }
 derive_more = "0.99"
 
+[dependencies.clap]
+version = "2"
+features = ["default", "wrap_help"]
+
 [dev-dependencies]
 tempfile = "3.1"
 
 [features]
 expensive_tests = []
+
+
+[profile.release]
+lto = "fat"
+opt-level = 3

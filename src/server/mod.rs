@@ -1,16 +1,15 @@
 mod client_approver;
 mod tui;
 
-pub use client_approver::ClientApprover;
+pub use client_approver::{ClientApprover, ConsoleApprover};
 
 use self::tui::ServerTui;
-use crate::models::DataSrvInfo;
 use crate::{
     encrypted_stream::{EncStreamErr, ServerEncryptedStreamStarter},
     filereader::AsyncFileReader,
+    igd::get_external_addr,
     mnemonic::random_word,
-    models::DiscoveryReply,
-    server::client_approver::ConsoleApprover,
+    models::{DataSrvInfo, DiscoveryReply},
     tui::{init_console_logger, TuiApprover},
 };
 use anyhow::{anyhow, Context, Error};
@@ -23,6 +22,7 @@ use bincode::serialize;
 use futures::io::AsyncRead;
 use futures::AsyncWrite;
 use rand::rngs::OsRng;
+use std::net::SocketAddr;
 use std::{
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
@@ -47,6 +47,7 @@ where
     encrypted: bool,
     client_approval_strategy: ClientApprovalStrategy,
     file_name: String,
+    use_igd: bool,
 }
 
 impl<T> FileSrv<T>
@@ -79,7 +80,14 @@ where
 
         info!("Serving file {}", &self.file_name);
 
-        let tcp_port = self.tcp_sock.local_addr()?.port();
+        let tcp_addr = self.tcp_sock.local_addr()?;
+        if self.use_igd {
+            if let SocketAddr::V4(s) = &tcp_addr {
+                get_external_addr(s.port())?;
+            }
+        }
+
+        let tcp_port = tcp_addr.port();
 
         self.udp_sock.set_broadcast(true)?;
         info!("UDP Listening on {}", self.udp_sock.local_addr()?);
@@ -242,6 +250,7 @@ pub struct FileSrvBuilder {
     listen_addr: String,
     client_approval_strategy: ClientApprovalStrategy,
     file_path: PathBuf,
+    use_igd: bool,
 }
 
 #[cfg(not(test))]
@@ -255,6 +264,7 @@ fn udp_srv_bind_addr(port_num: u16) -> String {
     format!("0.0.0.0:{}", port_num)
 }
 
+// TODO: Make work with more than my gateway
 #[cfg(target_family = "unix")]
 #[cfg(not(test))]
 fn udp_srv_bind_addr(port_num: u16) -> String {
@@ -274,6 +284,7 @@ impl FileSrvBuilder {
             udp_port: 0,
             stay_alive: false,
             encryption: false,
+            use_igd: false,
             listen_addr: DEFAULT_TCP_LISTEN_ADDR.to_string(),
             client_approval_strategy: ClientApprovalStrategy::ApproveAll,
         }
@@ -286,6 +297,11 @@ impl FileSrvBuilder {
 
     pub fn set_stayalive(mut self, stayalive: bool) -> Self {
         self.stay_alive = stayalive;
+        self
+    }
+
+    pub fn set_igd(mut self, igd: bool) -> Self {
+        self.use_igd = igd;
         self
     }
 
@@ -323,6 +339,7 @@ impl FileSrvBuilder {
             encrypted: self.encryption,
             client_approval_strategy: self.client_approval_strategy,
             file_name,
+            use_igd: self.use_igd,
         })
     }
 }
@@ -346,6 +363,7 @@ pub async fn test_filesrv(
         name: name.to_string(),
         encrypted,
         client_approval_strategy: ClientApprovalStrategy::ApproveAll,
+        use_igd: false,
         file_name: "not a real file".to_string(),
     }
 }
