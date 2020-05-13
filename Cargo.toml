@@ -34,6 +34,7 @@ features = ["default", "wrap_help"]
 
 [dev-dependencies]
 tempfile = "3.1"
+futures_ringbuf = "0.2"
 
 [features]
 expensive_tests = []

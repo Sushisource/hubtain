@@ -402,18 +402,19 @@ pub enum EncStreamErr {
 mod encrypted_stream_tests {
     use super::*;
     use crate::server::ConsoleApprover;
-    use async_std::{os::unix::net::UnixStream, task::block_on};
+    use async_std::task::block_on;
     use futures::{future::join, io::Cursor};
+    use futures_ringbuf::Endpoint;
     use rand::rngs::OsRng;
     use test::Bencher;
 
     #[async_std::test]
     async fn encrypted_copy_works() {
         let test_data = &b"Oh boy what fun data to send!".repeat(100);
-        let (server_sock, mut client_sock) = UnixStream::pair().unwrap();
+        let (server, mut client) = Endpoint::pair(10000, 10000);
 
-        let server_task = server_task(test_data, server_sock);
-        let client_task = client_task(&mut client_sock);
+        let server_task = server_task(test_data, server);
+        let client_task = client_task(&mut client);
 
         join(server_task, client_task).await;
     }
@@ -423,10 +424,10 @@ mod encrypted_stream_tests {
         b.iter(|| {
             block_on(async {
                 let test_data = &b"Oh boy what fun data to send!".repeat(100);
-                let (server_sock, mut client_sock) = UnixStream::pair().unwrap();
+                let (server, mut client) = Endpoint::pair(10000, 10000);
 
-                let server_task = server_task(test_data, server_sock);
-                let client_task = client_task(&mut client_sock);
+                let server_task = server_task(test_data, server);
+                let client_task = client_task(&mut client);
 
                 join(server_task, client_task).await;
             })
@@ -434,7 +435,7 @@ mod encrypted_stream_tests {
     }
 
     #[inline]
-    async fn server_task(test_data: &[u8], mut server_sock: UnixStream) {
+    async fn server_task(test_data: &[u8], mut server_sock: Endpoint) {
         let data_src = Cursor::new(test_data);
         let secret = EphemeralSecret::new(&mut OsRng);
         let server_stream = ServerEncryptedStreamStarter::new(&mut server_sock, secret);
@@ -447,7 +448,7 @@ mod encrypted_stream_tests {
     }
 
     #[inline]
-    async fn client_task(mut client_sock: &mut UnixStream) -> Vec<u8> {
+    async fn client_task(mut client_sock: &mut Endpoint) -> Vec<u8> {
         let mut data_sink = Cursor::new(vec![]);
         let secret = EphemeralSecret::new(&mut OsRng);
         let enc_stream = ClientEncryptedStreamStarter::new(&mut client_sock, secret);
