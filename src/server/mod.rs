@@ -56,7 +56,7 @@ where
 {
     /// Begin listening for connections and serving data
     ///
-    /// Also:
+    /// ## Also:
     /// * Initialize the TUI if the terminal is a tty & using encryption & staying alive
     pub async fn serve(self) -> Result<(), Error> {
         let approver: Box<dyn ClientApprover>;
@@ -83,7 +83,11 @@ where
         let tcp_addr = self.tcp_sock.local_addr()?;
         if self.use_igd {
             if let SocketAddr::V4(s) = &tcp_addr {
-                get_external_addr(s.port())?;
+                let external_addr = get_external_addr(s.port())?;
+                info!(
+                    "Obtained external address, share this to your downloader: {}",
+                    external_addr
+                )
             }
         }
 
@@ -113,6 +117,7 @@ where
         let mut buf = vec![0u8; 100];
         loop {
             if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
+                data_handle.await?;
                 break;
             }
             let (_, peer) = match io::timeout(
@@ -135,10 +140,6 @@ where
                 tcp_port,
             })?;
             self.udp_sock.send_to(&initial_info, &peer).await?;
-            if !self.stay_alive {
-                data_handle.await?;
-                break;
-            }
         }
 
         if let Some(t) = tui_handle {
@@ -216,6 +217,7 @@ where
             });
             if !stay_alive {
                 // Assumes only one client matters in no-stay-alive mode.
+                SHUTDOWN_FLAG.store(true, Ordering::SeqCst);
                 h.await?;
                 return Ok(());
             }

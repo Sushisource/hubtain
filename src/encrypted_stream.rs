@@ -421,9 +421,9 @@ mod encrypted_stream_tests {
 
     #[bench]
     fn full_small_encrypted_transfer_with_exchange(b: &mut Bencher) {
+        let test_data = &b"Oh boy what fun data to send!".repeat(100);
         b.iter(|| {
             block_on(async {
-                let test_data = &b"Oh boy what fun data to send!".repeat(100);
                 let (server, mut client) = Endpoint::pair(10000, 10000);
 
                 let server_task = server_task(test_data, server);
