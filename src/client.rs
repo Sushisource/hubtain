@@ -3,7 +3,7 @@ use crate::{
     encrypted_stream::ClientEncryptedStreamStarter, filewriter::AsyncFileWriter,
     models::DiscoveryReply, BROADCAST_ADDR,
 };
-use anyhow::{anyhow, Error};
+use anyhow::{anyhow, Context, Error};
 use async_std::net::ToSocketAddrs;
 use async_std::{
     future::{self, timeout},
@@ -47,7 +47,7 @@ impl DownloadClient {
         let ping = vec![0];
         client_s.send_to(&ping, broadcast_addr).await?;
         let replies = read_replies_for(&mut client_s, Duration::from_secs(1)).await?;
-        let replies: Result<Vec<ServerInfo>, Error> = replies
+        let replies: Result<Vec<_>, Error> = replies
             .into_iter()
             .map(|(bytes, peer)| {
                 let reply: DiscoveryReply = deserialize(&bytes)?;
@@ -67,7 +67,9 @@ impl DownloadClient {
     }
 
     pub async fn connect<A: ToSocketAddrs>(server_addr: A) -> Result<Self, Error> {
-        let stream = TcpStream::connect(server_addr).await?;
+        let stream = timeout(Duration::from_secs(10), TcpStream::connect(server_addr))
+            .await
+            .context("Timeout connecting to server")??;
         info!(
             "Client on {:?} connected to server at {:?}!",
             stream.local_addr(),
