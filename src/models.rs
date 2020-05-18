@@ -43,9 +43,9 @@ pub struct DiscoveryReply {
     pub tcp_port: u16,
 }
 
-#[derive(Copy, Clone, Constructor, Hash, Eq, PartialEq)]
+#[derive(Clone, Constructor, Hash, Eq, PartialEq)]
 pub struct ClientId {
-    pubkey: [u8; 32],
+    pubkey: Vec<u8>,
 }
 
 impl Display for ClientId {

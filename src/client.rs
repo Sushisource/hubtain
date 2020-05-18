@@ -1,12 +1,11 @@
-use crate::models::DataSrvInfo;
 use crate::{
     encrypted_stream::ClientEncryptedStreamStarter, filewriter::AsyncFileWriter,
-    models::DiscoveryReply, BROADCAST_ADDR,
+    models::DataSrvInfo, models::DiscoveryReply, BROADCAST_ADDR,
 };
 use anyhow::{anyhow, Context, Error};
-use async_std::net::ToSocketAddrs;
 use async_std::{
     future::{self, timeout},
+    net::ToSocketAddrs,
     net::{TcpStream, UdpSocket},
     prelude::FutureExt,
 };
@@ -14,7 +13,6 @@ use bincode::deserialize;
 use derive_more::Constructor;
 use futures::{select, AsyncRead, AsyncWrite, FutureExt as OFutureExt};
 use indicatif::ProgressBar;
-use rand::rngs::OsRng;
 use std::{
     fs::OpenOptions,
     net::SocketAddr,
@@ -23,7 +21,6 @@ use std::{
     sync::{atomic::AtomicUsize, atomic::Ordering, Arc},
     time::Duration,
 };
-use x25519_dalek::EphemeralSecret;
 
 /// Client for hubtain's fetch mode
 pub struct DownloadClient {
@@ -145,8 +142,7 @@ impl DownloadClient {
     }
 
     async fn encryption_handshake(&mut self) -> Result<Pin<Box<dyn AsyncRead + Send + '_>>, Error> {
-        let secret = EphemeralSecret::new(&mut OsRng);
-        let enc_stream = ClientEncryptedStreamStarter::new(&mut self.stream, secret);
+        let enc_stream = ClientEncryptedStreamStarter::new(&mut self.stream);
         info!("Client encrypytion handshaking");
         let enc_stream = enc_stream.key_exchange().await?;
         Ok(Box::pin(enc_stream))
@@ -154,7 +150,7 @@ impl DownloadClient {
 
     async fn drain_downloaded_to_stream<T>(
         mut download: &mut T,
-        stream: impl AsyncRead + Send,
+        stream: impl AsyncRead,
     ) -> Result<u64, Error>
     where
         T: AsyncWrite + Unpin,

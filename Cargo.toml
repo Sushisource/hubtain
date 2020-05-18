@@ -27,6 +27,8 @@ colored = "1"
 lazy_static = "1"
 tui = { version =  "0.9", features = ["crossterm"], default_features = false }
 derive_more = "0.99"
+snow = "0.7.0-alpha4"
+pin-utils = "0.1"
 
 [dependencies.clap]
 version = "2"

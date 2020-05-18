@@ -269,6 +269,6 @@ mod main_test {
             .unwrap();
         dbg!("Done loading file after {:?}", start.elapsed());
         let content = include_bytes!("../testdata/large.bin");
-        assert_eq!(content.as_ref(), test_dat.as_slice());
+        assert!(content.as_ref() == test_dat.as_slice());
     }
 }

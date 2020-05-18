@@ -21,14 +21,12 @@ use async_std::{
 use bincode::serialize;
 use futures::io::AsyncRead;
 use futures::AsyncWrite;
-use rand::rngs::OsRng;
-use std::net::SocketAddr;
 use std::{
+    net::SocketAddr,
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-use x25519_dalek::EphemeralSecret;
 
 /// Can be set true to order the server to quit.
 pub static SHUTDOWN_FLAG: AtomicBool = AtomicBool::new(false);
@@ -187,8 +185,7 @@ where
                     let mut wstream: &mut (dyn AsyncWrite + Unpin + Send) = match enctype {
                         EncryptionType::Ephemeral => {
                             info!("Server handshaking");
-                            let secret = EphemeralSecret::new(&mut OsRng);
-                            let enc_stream = ServerEncryptedStreamStarter::new(&mut stream, secret);
+                            let enc_stream = ServerEncryptedStreamStarter::new(&mut stream);
                             let encrypted_stream =
                                 match enc_stream.key_exchange(client_strat, approver).await {
                                     Ok(es) => es,
