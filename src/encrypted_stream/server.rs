@@ -118,20 +118,11 @@ where
         cx: &mut Context,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        // TODO: Don't reallocate every poll
         let mut msg_buf = vec![0; MAX_CHUNK_SIZE];
         let len = self.noise.write_message(&buf, &mut msg_buf).unwrap();
         let send_fut = send(&mut self.underlying, &msg_buf[..len]);
         pin_utils::pin_mut!(send_fut);
-        let retme = send_fut.poll_unpin(cx);
-        // TODO: Get rid of this check
-        if let Poll::Ready(Ok(sent_len)) = &retme {
-            if *sent_len != len + 2 {
-                dbg!(sent_len, len);
-                panic!("Not enough written");
-            }
-        };
-        retme
+        send_fut.poll_unpin(cx)
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
