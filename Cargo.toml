@@ -4,6 +4,14 @@ version = "0.1.0"
 authors = ["Spencer Judge <spencer@xand.me>"]
 edition = "2018"
 
+[features]
+expensive_tests = []
+
+[profile.release]
+lto = "fat"
+opt-level = 3
+codegen-units = 1
+
 [dependencies]
 async-std = { features = ["unstable", "attributes"], version = "1.5" }
 async-trait = "0.1"
@@ -17,12 +25,10 @@ env_logger = "0.7"
 futures = "0.3"
 get_if_addrs = "0.5"
 rand = "0.7"
-ring = "0.16"
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.1"
 log = "0.4"
 mnemonic = "1.0.1"
-x25519-dalek = "0.6"
 colored = "1"
 lazy_static = "1"
 tui = { version =  "0.9", features = ["crossterm"], default_features = false }
@@ -37,12 +43,3 @@ features = ["default", "wrap_help"]
 [dev-dependencies]
 tempfile = "3.1"
 futures_ringbuf = "0.2"
-
-[features]
-expensive_tests = []
-
-
-[profile.release]
-lto = "fat"
-opt-level = 3
-codegen-units = 1
