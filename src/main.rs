@@ -253,21 +253,18 @@ mod main_test {
             .await
             .unwrap();
         let start = Instant::now();
-        dbg!("Began transfer");
         client
             .download_to_file("testdata/tmpdownload".into())
             .await
             .unwrap();
-        dbg!("Finished transfer after {:?}", start.elapsed());
+        dbg!("Finished transfer", start.elapsed());
 
-        let start = Instant::now();
         dbg!("Loading file");
         let mut test_dat = vec![];
         File::open("testdata/tmpdownload")
             .unwrap()
             .read_to_end(&mut test_dat)
             .unwrap();
-        dbg!("Done loading file after {:?}", start.elapsed());
         let content = include_bytes!("../testdata/large.bin");
         assert!(content.as_ref() == test_dat.as_slice());
     }

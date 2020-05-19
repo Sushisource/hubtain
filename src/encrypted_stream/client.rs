@@ -1,5 +1,6 @@
 use super::*;
 use crate::models::ClientId;
+use futures::io::ErrorKind;
 use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, FutureExt};
 use snow::TransportState;
 use std::{io, pin::Pin, task::Poll};
@@ -89,19 +90,18 @@ where
 
         match r {
             Poll::Ready(Ok(msg)) => {
-                dbg!(dbghash(&msg));
-                let written = self.noise.read_message(&msg, &mut buf).unwrap();
-                Poll::Ready(Ok(written))
+                if let Ok(written) = self.noise.read_message(&msg, &mut buf) {
+                    Poll::Ready(Ok(written))
+                } else {
+                    Poll::Ready(Err(io::Error::new(ErrorKind::Other, "Decryption error")))
+                }
             }
             Poll::Ready(Err(e)) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                dbg!("Eof");
+                debug!("Enncrypted read stream EOF");
                 Poll::Ready(Ok(0))
             }
             Poll::Ready(Err(e)) => panic!(e),
-            Poll::Pending => {
-                info!("Poll read pending");
-                Poll::Pending
-            }
+            Poll::Pending => Poll::Pending,
         }
     }
 }

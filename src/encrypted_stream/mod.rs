@@ -12,11 +12,7 @@ pub use client::ClientEncryptedStreamStarter;
 pub use server::ServerEncryptedStreamStarter;
 
 use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use std::{
-    collections::hash_map::DefaultHasher,
-    fmt::Debug,
-    hash::{Hash, Hasher},
-};
+use std::fmt::Debug;
 use thiserror::Error as DError;
 
 static PATTERN: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
@@ -61,15 +57,6 @@ pub async fn send<S: AsyncWrite + Unpin>(stream: &mut S, buf: &[u8]) -> std::io:
     stream.write_all(&msg_len_buf).await.unwrap();
     stream.write_all(buf).await.unwrap();
     Ok(msg_len_buf.len() + buf.len())
-}
-
-fn dbghash<T>(obj: T) -> u64
-where
-    T: Hash,
-{
-    let mut hasher = DefaultHasher::new();
-    obj.hash(&mut hasher);
-    hasher.finish()
 }
 
 #[cfg(test)]

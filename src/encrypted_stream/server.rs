@@ -122,7 +122,6 @@ where
         let mut msg_buf = vec![0; MAX_CHUNK_SIZE];
         let len = self.noise.write_message(&buf, &mut msg_buf).unwrap();
         let send_fut = send(&mut self.underlying, &msg_buf[..len]);
-        dbg!(dbghash(&msg_buf[..len]));
         pin_utils::pin_mut!(send_fut);
         let retme = send_fut.poll_unpin(cx);
         // TODO: Get rid of this check
