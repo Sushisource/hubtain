@@ -43,7 +43,7 @@ impl DownloadClient {
         client_s.set_broadcast(true)?;
         let ping = vec![0];
         client_s.send_to(&ping, broadcast_addr).await?;
-        let replies = read_replies_for(&mut client_s, Duration::from_secs(1)).await?;
+        let replies = read_replies_for(&mut client_s, Duration::from_secs(5)).await?;
         let replies: Result<Vec<_>, Error> = replies
             .into_iter()
             .map(|(bytes, peer)| {
