@@ -22,16 +22,16 @@ jobs:
           override: true
           components: rustfmt, clippy
 
-      - name: clean
-        uses: actions-rs/cargo@v1
-        with:
-          command: clean
-
       - name: Clippy
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --all-features --tests
+          args: --tests
+
+      - name: clean
+        uses: actions-rs/cargo@v1
+        with:
+          command: clean
 
       - name: Test
         uses: actions-rs/cargo@v1
