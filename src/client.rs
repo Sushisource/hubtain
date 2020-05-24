@@ -56,7 +56,10 @@ impl DownloadClient {
         let replies = replies?;
         info!("Client found the following servers: {:?}", &replies);
         if replies.is_empty() {
-            return Err(anyhow!("No servers found"));
+            return Err(anyhow!(
+                "No servers found when broadcasting to {}",
+                &broadcast_addr
+            ));
         }
         // Connect to the tcp port
         let selected_server = replies.into_iter().find(server_selection_strategy).unwrap();
