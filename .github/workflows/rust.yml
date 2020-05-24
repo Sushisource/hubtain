@@ -13,6 +13,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+
       - name: Install latest nightly
         uses: actions-rs/toolchain@v1
         with:
@@ -20,10 +21,18 @@ jobs:
           toolchain: nightly
           override: true
           components: rustfmt, clippy
+
+      - name: clean
+        uses: actions-rs/cargo@v1
+        with:
+          command: clean
+
       - name: Clippy
         uses: actions-rs/cargo@v1
         with:
-          command: clippy --all-features --tests
+          command: clippy
+          args: --all-features --tests
+
       - name: Test
         uses: actions-rs/cargo@v1
         with:
@@ -32,4 +41,5 @@ jobs:
         env:
           CARGO_INCREMENTAL: '0'
           RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+
       - uses: actions-rs/grcov@v0.1
