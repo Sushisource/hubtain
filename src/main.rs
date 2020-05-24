@@ -216,7 +216,7 @@ mod main_test {
         let udp_port = fsrv.udp_port().unwrap();
         let _ = spawn(fsrv.serve());
 
-        let dl_futures = (1..50).map(async move |_| {
+        let dl_futures = (1..25).map(async move |_| {
             let client = DownloadClient::find_server(udp_port, test_srvr_sel)
                 .await
                 .unwrap();

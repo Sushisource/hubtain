@@ -37,7 +37,8 @@ jobs:
         uses: actions-rs/tarpaulin@v0.1
         with:
           version: '0.12.4'
-          args: '-o Html -- --test-threads 1'
+          args: '-- --test-threads 1'
+          out-type: 'Html'
 
       - name: Upload code coverage results
         uses: actions/upload-artifact@v1
