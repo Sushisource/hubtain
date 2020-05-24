@@ -41,6 +41,7 @@ jobs:
 
       - name: Upload code coverage results
         uses: actions/upload-artifact@v1
+        if: ${{ always() }}
         with:
           name: code-coverage-report
           path: tarpaulin-report.html
