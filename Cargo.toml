@@ -13,7 +13,7 @@ opt-level = 3
 codegen-units = 1
 
 [dependencies]
-async-std = { features = ["unstable", "attributes"], version = "1.5" }
+async-std = { features = ["unstable", "attributes"], version = "1.6" }
 async-trait = "0.1"
 atty = "0.2.14"
 anyhow = "1.0"

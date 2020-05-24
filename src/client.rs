@@ -124,7 +124,6 @@ impl DownloadClient {
             .write(true)
             .open(path)?
             .set_len(data_len)?;
-        info!("...done!");
         Ok(())
     }
 

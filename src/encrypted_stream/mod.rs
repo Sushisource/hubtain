@@ -40,9 +40,7 @@ pub enum EncStreamErr {
     },
 }
 
-// TODO: Make this better
-
-/// Hyper-basic stream transport receiver. 16-bit BE size followed by payload.
+/// Simple stream chunking receiver. 16-bit BE size followed by payload.
 pub async fn recv<S: AsyncRead + Unpin>(stream: &mut S) -> std::io::Result<Vec<u8>> {
     let mut msg_len_buf = [0u8; 2];
     stream.read_exact(&mut msg_len_buf).await?;
@@ -52,7 +50,7 @@ pub async fn recv<S: AsyncRead + Unpin>(stream: &mut S) -> std::io::Result<Vec<u
     Ok(msg)
 }
 
-/// Hyper-basic stream transport sender. 16-bit BE size followed by payload.
+/// Simple stream chunking sender. 16-bit BE size followed by payload.
 pub async fn send<S: AsyncWrite + Unpin>(stream: &mut S, buf: &[u8]) -> std::io::Result<usize> {
     let msg_len_buf = (buf.len() as u16).to_be_bytes();
     stream.write_all(&msg_len_buf).await.unwrap();
