@@ -112,7 +112,7 @@ where
         ));
 
         // Wait for broadcast from peer
-        let mut buf = vec![0u8; 100];
+        let mut buf = vec![0u8; 2];
         loop {
             if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
                 data_handle.await?;

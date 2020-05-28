@@ -54,13 +54,13 @@ impl DownloadClient {
             })
             .collect();
         let replies = replies?;
-        info!("Client found the following servers: {:?}", &replies);
         if replies.is_empty() {
             return Err(anyhow!(
                 "No servers found when broadcasting to {}",
                 &broadcast_addr
             ));
         }
+        info!("Client found the following servers: {:?}", &replies);
         // Connect to the tcp port
         let selected_server = replies.into_iter().find(server_selection_strategy).unwrap();
         Self::connect(selected_server.addr).await
@@ -185,6 +185,8 @@ pub fn test_srvr_sel(_: &ServerInfo) -> bool {
     true
 }
 
+// TODO: This always runs for duration. ALso it sucks and should deserialize
+//   the reply. Need to use length encoding send/rcv
 async fn read_replies_for(
     sock: &mut UdpSocket,
     duration: Duration,
