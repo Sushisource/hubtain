@@ -1,7 +1,9 @@
-use crate::{
-    models::ClientId,
-    server::{ClientApprover, SHUTDOWN_FLAG},
-};
+#[cfg(not(test))]
+use crate::server::SHUTDOWN_FLAG;
+#[cfg(not(test))]
+use std::sync::atomic::Ordering;
+
+use crate::{models::ClientId, server::ClientApprover};
 use anyhow::{anyhow, Error};
 use crossterm::event::{self, Event};
 use futures::{
@@ -10,11 +12,7 @@ use futures::{
     SinkExt, StreamExt,
 };
 use log::{LevelFilter, Log, Metadata, Record};
-use std::{
-    io::Write,
-    sync::{atomic::Ordering, Once},
-    time::Duration,
-};
+use std::{io::Write, sync::Once, time::Duration};
 
 static LOGGER_INITTED: Once = Once::new();
 
@@ -88,6 +86,7 @@ impl ClientApprover for TuiApprover {
 /// Can be run in it's own thread to forward crossterm events to the TUI
 pub fn event_forwarder(mut tx: Sender<TermMsg>) -> crossterm::Result<()> {
     loop {
+        #[cfg(not(test))]
         if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
             break Ok(());
         }

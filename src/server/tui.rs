@@ -1,6 +1,10 @@
+#[cfg(not(test))]
+use crate::server::SHUTDOWN_FLAG;
+#[cfg(not(test))]
+use std::sync::atomic::Ordering;
+
 use crate::{
     models::ClientId,
-    server::SHUTDOWN_FLAG,
     tui::{event_forwarder, TermMsg, TuiLogger},
 };
 use anyhow::Error;
@@ -19,7 +23,6 @@ use log::LevelFilter;
 use std::{
     collections::VecDeque,
     io::{self, stdout, Write},
-    sync::atomic::Ordering,
     thread::JoinHandle,
 };
 use tui::{
@@ -49,6 +52,7 @@ pub struct TuiHandle {
 impl TuiHandle {
     pub fn join(self) {
         // In case it hasn't been already.
+        #[cfg(not(test))]
         SHUTDOWN_FLAG.store(true, Ordering::SeqCst);
         self.render_thread
             .join()
@@ -113,6 +117,7 @@ impl ServerTui {
 
         macro_rules! quit {
             () => {
+                #[cfg(not(test))]
                 SHUTDOWN_FLAG.store(true, Ordering::SeqCst);
                 break;
             };
@@ -218,6 +223,7 @@ impl ServerTui {
                 f.render_stateful_widget(items, chunks[1], &mut self.clients_state);
             })?;
 
+            #[cfg(not(test))]
             if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
                 break;
             }

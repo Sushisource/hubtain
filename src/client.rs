@@ -43,7 +43,11 @@ impl DownloadClient {
         client_s.set_broadcast(true)?;
         let ping = vec![0];
         client_s.send_to(&ping, broadcast_addr).await?;
-        let replies = read_replies_for(&mut client_s, Duration::from_secs(5)).await?;
+        #[cfg(not(test))]
+        let read_dur = Duration::from_secs(2);
+        #[cfg(test)]
+        let read_dur = Duration::from_millis(200);
+        let replies = read_replies_for(&mut client_s, read_dur).await?;
         let replies: Result<Vec<_>, Error> = replies
             .into_iter()
             .map(|(bytes, peer)| {
@@ -185,8 +189,7 @@ pub fn test_srvr_sel(_: &ServerInfo) -> bool {
     true
 }
 
-// TODO: This always runs for duration. ALso it sucks and should deserialize
-//   the reply. Need to use length encoding send/rcv
+/// Reads replies to our broadcast ping for the entire given duration
 async fn read_replies_for(
     sock: &mut UdpSocket,
     duration: Duration,
@@ -194,17 +197,19 @@ async fn read_replies_for(
     // Wait for broadcast from peer
     let mut buf = vec![0u8; 100];
     let mut retme = vec![];
-    loop {
-        match timeout(duration, sock.recv_from(&mut buf)).await {
-            Ok(Ok((_, peer))) => {
-                let cur_content = buf.to_vec();
-                retme.push((cur_content, peer));
-            }
-            Ok(Err(e)) => return Err(e.into()),
-            Err(_) => {
-                break;
+    timeout(duration, async {
+        loop {
+            match sock.recv_from(&mut buf).await {
+                Ok((_, peer)) => {
+                    let cur_content = buf.to_vec();
+                    retme.push((cur_content, peer));
+                }
+                Err(e) => return Result::<(), _>::Err(e),
             }
         }
-    }
+    })
+    .await
+    // Just drop the timeout error - we don't really care
+    .unwrap_or_else(|_| Ok(()))?;
     Ok(retme)
 }

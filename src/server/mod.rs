@@ -19,16 +19,14 @@ use async_std::{
     task::spawn,
 };
 use bincode::serialize;
-use futures::io::AsyncRead;
-use futures::AsyncWrite;
-use std::{
-    net::SocketAddr,
-    path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
-};
+use futures::{io::AsyncRead, AsyncWrite};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
-/// Can be set true to order the server to quit.
+#[cfg(not(test))]
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Can be set true to order the server to quit. Only used for TUI purposes.
+#[cfg(not(test))]
 pub static SHUTDOWN_FLAG: AtomicBool = AtomicBool::new(false);
 
 /// File server for hubtain's srv mode
@@ -114,6 +112,7 @@ where
         // Wait for broadcast from peer
         let mut buf = vec![0u8; 2];
         loop {
+            #[cfg(not(test))]
             if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
                 data_handle.await?;
                 break;
@@ -138,12 +137,21 @@ where
                 tcp_port,
             })?;
             self.udp_sock.send_to(&initial_info, &peer).await?;
+
+            // Since we have offloaded the first client to the data server we don't care about
+            // any other clients in no-stay-alive mode.
+            if !self.stay_alive {
+                data_handle.await?;
+                break;
+            }
         }
 
         if let Some(t) = tui_handle {
             t.join()
         }
 
+        #[cfg(not(test))]
+        SHUTDOWN_FLAG.store(false, Ordering::SeqCst);
         Ok(())
     }
 
@@ -214,6 +222,7 @@ where
             });
             if !stay_alive {
                 // Assumes only one client matters in no-stay-alive mode.
+                #[cfg(not(test))]
                 SHUTDOWN_FLAG.store(true, Ordering::SeqCst);
                 h.await?;
                 return Ok(());

@@ -191,16 +191,8 @@ mod main_test {
             .download_to_file(download_to.path().to_path_buf())
             .await
             .unwrap();
-        let mut expected_dat = vec![];
-        File::open("testdata/small.txt")
-            .unwrap()
-            .read_to_end(&mut expected_dat)
-            .unwrap();
-        let mut test_dat = vec![];
-        File::open(download_to.path())
-            .unwrap()
-            .read_to_end(&mut test_dat)
-            .unwrap();
+        let expected_dat = std::fs::read("testdata/small.txt").unwrap();
+        let test_dat = std::fs::read(download_to.path()).unwrap();
         assert_eq!(expected_dat, test_dat);
         server_f.await.unwrap();
     }
