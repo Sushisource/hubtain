@@ -43,6 +43,7 @@ pub struct ServerTui {
     file_name: String,
 }
 
+#[must_use]
 pub struct TuiHandle {
     pub tx: Sender<TermMsg>,
     render_thread: JoinHandle<io::Result<()>>,

@@ -1,4 +1,5 @@
 mod client_approver;
+mod ngrok;
 mod tui;
 
 pub use client_approver::{ClientApprover, ConsoleApprover};
@@ -22,6 +23,7 @@ use bincode::serialize;
 use futures::{io::AsyncRead, AsyncWrite};
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
+use crate::server::ngrok::get_tunnel;
 #[cfg(not(test))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -43,7 +45,7 @@ where
     encrypted: bool,
     client_approval_strategy: ClientApprovalStrategy,
     file_name: String,
-    use_igd: bool,
+    holepuncher: HolePuncher,
 }
 
 impl<T> FileSrv<T>
@@ -77,15 +79,34 @@ where
         info!("Serving file {}", &self.file_name);
 
         let tcp_addr = self.tcp_sock.local_addr()?;
-        if self.use_igd {
-            if let SocketAddr::V4(s) = &tcp_addr {
-                let external_addr = get_external_addr(s.port())?;
-                info!(
-                    "Obtained external address, share this to your downloader: {}",
-                    external_addr
-                )
+        let ngrok_handle = match self.holepuncher {
+            HolePuncher::None => None,
+            HolePuncher::IGD => {
+                if let SocketAddr::V4(s) = &tcp_addr {
+                    let external_addr = get_external_addr(s.port())?;
+                    info!(
+                        "Obtained external address, share this to your downloader: {}",
+                        external_addr
+                    )
+                } else {
+                    return Err(anyhow!("Couldn't determine local address during IGD"));
+                }
+                None
             }
-        }
+            HolePuncher::Ngrok => {
+                // Ask for a tunnel to our tcp port
+                if let SocketAddr::V4(s) = &tcp_addr {
+                    let ngrok = get_tunnel(s.port()).await?;
+                    info!(
+                        "Obtained external address, share this to your downloader: {}",
+                        ngrok.get_address()
+                    );
+                    Some(ngrok)
+                } else {
+                    return Err(anyhow!("Couldn't determine local address for ngrok to use"));
+                }
+            }
+        };
 
         let tcp_port = tcp_addr.port();
 
@@ -147,7 +168,10 @@ where
         }
 
         if let Some(t) = tui_handle {
-            t.join()
+            t.join();
+        }
+        if let Some(h) = ngrok_handle {
+            h.shutdown()?;
         }
 
         #[cfg(not(test))]
@@ -258,7 +282,14 @@ pub struct FileSrvBuilder {
     listen_addr: String,
     client_approval_strategy: ClientApprovalStrategy,
     file_path: PathBuf,
-    use_igd: bool,
+    holepunch: HolePuncher,
+}
+
+/// Method being used to punch a hole for an external address
+pub enum HolePuncher {
+    None,
+    IGD,
+    Ngrok,
 }
 
 #[cfg(not(test))]
@@ -292,7 +323,7 @@ impl FileSrvBuilder {
             udp_port: 0,
             stay_alive: false,
             encryption: false,
-            use_igd: false,
+            holepunch: HolePuncher::None,
             listen_addr: DEFAULT_TCP_LISTEN_ADDR.to_string(),
             client_approval_strategy: ClientApprovalStrategy::ApproveAll,
         }
@@ -308,8 +339,8 @@ impl FileSrvBuilder {
         self
     }
 
-    pub fn set_igd(mut self, igd: bool) -> Self {
-        self.use_igd = igd;
+    pub fn set_holepuncher(mut self, holepuncher: HolePuncher) -> Self {
+        self.holepunch = holepuncher;
         self
     }
 
@@ -347,7 +378,7 @@ impl FileSrvBuilder {
             encrypted: self.encryption,
             client_approval_strategy: self.client_approval_strategy,
             file_name,
-            use_igd: self.use_igd,
+            holepuncher: self.holepunch,
         })
     }
 }
@@ -371,7 +402,7 @@ pub async fn test_filesrv(
         name: name.to_string(),
         encrypted,
         client_approval_strategy: ClientApprovalStrategy::ApproveAll,
-        use_igd: false,
+        holepuncher: HolePuncher::None,
         file_name: "not a real file".to_string(),
     }
 }

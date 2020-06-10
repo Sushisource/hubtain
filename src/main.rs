@@ -23,6 +23,7 @@ mod progresswriter;
 mod server;
 mod tui;
 
+use crate::server::HolePuncher;
 use crate::{
     client::DownloadClient, filereader::AsyncFileReader, server::FileSrvBuilder,
     tui::init_console_logger,
@@ -61,6 +62,10 @@ async fn main() -> Result<(), Error> {
             (@arg igd: -g --igd "Uses the UPnP IGD protocol to ask your router to map an external \
                                  address and port back to this computer. Likely to fail if you \
                                  are more than one hop away from the router.")
+            (@arg ngrok: -k --ngrok conflicts_with[igd]
+                "Use ngrok to create a publicly accessible URL that you \
+                can send to your downloader. Use this if --igd fails. ngrok must be present on \
+                your path, and configured with your auth token. See https://ngrok.com/")
         )
         (@subcommand fetch =>
             (about: "Client download mode")
@@ -93,11 +98,18 @@ async fn main() -> Result<(), Error> {
             let file_path = sc.value_of("FILE").expect("file arg is required");
             let serv_file = AsyncFileReader::new(file_path)?;
             let encryption = !sc.is_present("no_encryption");
+            let holepuncher = if sc.is_present("igd") {
+                HolePuncher::IGD
+            } else if sc.is_present("ngrok") {
+                HolePuncher::Ngrok
+            } else {
+                HolePuncher::None
+            };
             let fsrv = FileSrvBuilder::new(serv_file)
                 .set_udp_port(42444)
                 .set_stayalive(sc.is_present("stayalive"))
                 .set_encryption(encryption)
-                .set_igd(sc.is_present("igd"))
+                .set_holepuncher(holepuncher)
                 .build()
                 .await?;
             fsrv.serve().await?;
