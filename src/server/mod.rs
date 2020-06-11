@@ -79,19 +79,18 @@ where
         info!("Serving file {}", &self.file_name);
 
         let tcp_addr = self.tcp_sock.local_addr()?;
-        let ngrok_handle = match self.holepuncher {
-            HolePuncher::None => None,
+
+        let mut ngrok_handle = None;
+        let mut igd_handle = None;
+        match self.holepuncher {
+            HolePuncher::None => (),
             HolePuncher::IGD => {
                 if let SocketAddr::V4(s) = &tcp_addr {
                     let external_addr = get_external_addr(s.port())?;
-                    info!(
-                        "Obtained external address, share this to your downloader: {}",
-                        external_addr
-                    )
+                    igd_handle = Some(external_addr);
                 } else {
                     return Err(anyhow!("Couldn't determine local address during IGD"));
                 }
-                None
             }
             HolePuncher::Ngrok => {
                 // Ask for a tunnel to our tcp port
@@ -101,7 +100,7 @@ where
                         "Obtained external address, share this to your downloader: {}",
                         ngrok.get_address()
                     );
-                    Some(ngrok)
+                    ngrok_handle = Some(ngrok);
                 } else {
                     return Err(anyhow!("Couldn't determine local address for ngrok to use"));
                 }
@@ -172,6 +171,9 @@ where
         }
         if let Some(h) = ngrok_handle {
             h.shutdown()?;
+        }
+        if let Some(h) = igd_handle {
+            h.free()?;
         }
 
         #[cfg(not(test))]
