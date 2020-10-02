@@ -66,7 +66,10 @@ impl DownloadClient {
         }
         info!("Client found the following servers: {:?}", &replies);
         // Connect to the tcp port
-        let selected_server = replies.into_iter().find(server_selection_strategy).unwrap();
+        let selected_server = replies
+            .into_iter()
+            .find(server_selection_strategy)
+            .ok_or_else(|| anyhow!("Failed to select a server out of found servers!"))?;
         Self::connect(selected_server.addr).await
     }
 

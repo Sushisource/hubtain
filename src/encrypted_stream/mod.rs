@@ -38,6 +38,11 @@ pub enum EncStreamErr {
         #[from]
         source: anyhow::Error,
     },
+    #[error("Snow error")]
+    SnowErr {
+        #[from]
+        source: snow::Error,
+    },
 }
 
 /// Simple stream chunking receiver. 16-bit BE size followed by payload.
@@ -53,8 +58,8 @@ pub async fn recv<S: AsyncRead + Unpin>(stream: &mut S) -> std::io::Result<Vec<u
 /// Simple stream chunking sender. 16-bit BE size followed by payload.
 pub async fn send<S: AsyncWrite + Unpin>(stream: &mut S, buf: &[u8]) -> std::io::Result<usize> {
     let msg_len_buf = (buf.len() as u16).to_be_bytes();
-    stream.write_all(&msg_len_buf).await.unwrap();
-    stream.write_all(buf).await.unwrap();
+    stream.write_all(&msg_len_buf).await?;
+    stream.write_all(buf).await?;
     Ok(msg_len_buf.len() + buf.len())
 }
 

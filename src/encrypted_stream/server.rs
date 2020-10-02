@@ -31,27 +31,23 @@ where
         approval_strat: ClientApprovalStrategy,
         approver: &dyn ClientApprover,
     ) -> Result<EncryptedWriteStream<'a, S>, EncStreamErr> {
-        let noise = snow::Builder::new(PATTERN.parse().unwrap());
-        let key = noise.generate_keypair().unwrap();
+        let noise = snow::Builder::new(PATTERN.parse().expect("Noise pattern is fixed"));
+        let key = noise.generate_keypair()?;
 
-        let mut noise = noise
-            .local_private_key(&key.private)
-            .build_responder()
-            .unwrap();
+        let mut noise = noise.local_private_key(&key.private).build_responder()?;
         let mut buf = vec![0u8; MAX_CHUNK_SIZE];
         // <- e
-        noise
-            .read_message(&recv(&mut self.underlying).await.unwrap(), &mut buf)
-            .unwrap();
+        noise.read_message(&recv(&mut self.underlying).await?, &mut buf)?;
         // -> e, ee, s, es
-        let len = noise.write_message(&[0u8; 0], &mut buf).unwrap();
-        send(&mut self.underlying, &buf[..len]).await.unwrap();
+        let len = noise.write_message(&[0u8; 0], &mut buf)?;
+        send(&mut self.underlying, &buf[..len]).await?;
         // <- s, se
-        noise
-            .read_message(&recv(&mut self.underlying).await.unwrap(), &mut buf)
-            .unwrap();
+        noise.read_message(&recv(&mut self.underlying).await?, &mut buf)?;
 
-        let their_pubkey = noise.get_remote_static().unwrap().to_vec();
+        let their_pubkey = noise
+            .get_remote_static()
+            .expect("Pubkey is available in this noise pattern")
+            .to_vec();
         match approval_strat {
             ClientApprovalStrategy::ApproveAll => {
                 #[cfg(not(test))]
@@ -77,7 +73,7 @@ where
             }
         };
 
-        let noise = noise.into_transport_mode().unwrap();
+        let noise = noise.into_transport_mode()?;
         EncryptedWriteStream::new(self.underlying, noise, their_pubkey)
     }
 }

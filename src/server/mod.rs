@@ -246,7 +246,10 @@ where
                     };
                     futures::io::copy(data_src, &mut wstream)
                         .await
-                        .context("Couldn't complete transfer to client")?;
+                        .context(format!(
+                            "I/O error while trying to transfer to client {}",
+                            addr
+                        ))?;
                     info!("Done serving {}", extra);
                     Ok(())
                 })()

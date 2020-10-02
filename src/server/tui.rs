@@ -25,6 +25,7 @@ use std::{
     io::{self, stdout, Write},
     thread::JoinHandle,
 };
+use tui::text::Span;
 use tui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -134,6 +135,7 @@ impl ServerTui {
                                 // Client approved, remove it
                                 self.clients_state.selected().map(|i| {
                                     self.clients.remove(i).map(|(name, mut tx)| {
+                                        // TODO: This is a weird place to log this
                                         info!("Client downloading: {}", name);
                                         tx.try_send(true)
                                     })
@@ -193,7 +195,7 @@ impl ServerTui {
                     .constraints([Constraint::Percentage(80), Constraint::Percentage(20)].as_ref())
                     .split(f.size());
 
-                let style = Style::default().fg(Color::White).bg(Color::Black);
+                let style = Style::default().fg(Color::White);
                 let logs: Vec<_> = self
                     .logs
                     .iter()
@@ -217,7 +219,7 @@ impl ServerTui {
                         if chop_id_at > 5 {
                             client_id.truncate(chop_id_at as usize);
                         }
-                        ListItem::new(Text::styled(client_id, style))
+                        ListItem::new(Span::styled(client_id, style))
                     })
                     .collect();
                 let items = List::new(items)

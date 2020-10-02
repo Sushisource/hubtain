@@ -23,26 +23,21 @@ where
     /// of the stream that can be read/write from, transparently encrypting/decrypting the
     /// data.
     pub async fn key_exchange(mut self) -> Result<EncryptedReadStream<'a, S>, EncStreamErr> {
-        let noise = snow::Builder::new(PATTERN.parse().unwrap());
-        let key = noise.generate_keypair().unwrap();
+        let noise = snow::Builder::new(PATTERN.parse().expect("Noise pattern is fixed"));
+        let key = noise.generate_keypair()?;
 
         info!("Your client id is: {}", ClientId::new(key.public.clone()));
 
-        let mut noise = noise
-            .local_private_key(&key.private)
-            .build_initiator()
-            .unwrap();
+        let mut noise = noise.local_private_key(&key.private).build_initiator()?;
         let mut buf = vec![0u8; 65535];
         // -> e
-        let len = noise.write_message(&[], &mut buf).unwrap();
-        send(&mut self.underlying, &buf[..len]).await.unwrap();
+        let len = noise.write_message(&[], &mut buf)?;
+        send(&mut self.underlying, &buf[..len]).await?;
         // <- e, ee, s, es
-        noise
-            .read_message(&recv(&mut self.underlying).await.unwrap(), &mut buf)
-            .unwrap();
+        noise.read_message(&recv(&mut self.underlying).await?, &mut buf)?;
         // -> s, se
-        let len = noise.write_message(&[], &mut buf).unwrap();
-        send(&mut self.underlying, &buf[..len]).await.unwrap();
+        let len = noise.write_message(&[], &mut buf)?;
+        send(&mut self.underlying, &buf[..len]).await?;
 
         // Client reads the accepted/rejected byte
         let mut buff = vec![0; 1];
@@ -54,7 +49,7 @@ where
         }
         info!("Approved.");
 
-        let noise = noise.into_transport_mode().unwrap();
+        let noise = noise.into_transport_mode()?;
         EncryptedReadStream::new(self.underlying, noise)
     }
 }
