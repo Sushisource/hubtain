@@ -29,7 +29,8 @@ use tui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListState, Text},
+    text::Text,
+    widgets::{Block, Borders, List, ListItem, ListState},
     Terminal,
 };
 
@@ -186,40 +187,47 @@ impl ServerTui {
                 None => panic!("Ui loop channel died"),
             };
 
-            terminal.draw(|mut f| {
+            terminal.draw(|f| {
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Percentage(80), Constraint::Percentage(20)].as_ref())
                     .split(f.size());
 
+                let style = Style::default().fg(Color::White).bg(Color::Black);
+                let logs: Vec<_> = self
+                    .logs
+                    .iter()
+                    .map(|s| ListItem::new(Text::styled(s.to_string(), style)))
+                    .collect();
                 let title = format!(
                     " Server name: {} - Serving: {} ",
                     &self.name, &self.file_name
                 );
-                let logblock = Block::default().title(&title).borders(Borders::ALL);
-                f.render_widget(logblock, chunks[0]);
-                let client_block = Block::default()
-                    .title("Client requests (enter to approve, 'n' to deny)")
-                    .borders(Borders::ALL);
-                f.render_widget(client_block, chunks[1]);
+                let logs = List::new(logs)
+                    .block(Block::default().borders(Borders::ALL).title(title))
+                    .style(style);
+                f.render_stateful_widget(logs, chunks[0], &mut self.log_state);
 
-                let style = Style::default().fg(Color::White).bg(Color::Black);
-                let items = self.logs.iter().map(|s| Text::styled(s.to_string(), style));
-                let items = List::new(items).block(logblock).style(style);
-                f.render_stateful_widget(items, chunks[0], &mut self.log_state);
-
-                let items = self.clients.iter().map(|s| {
-                    let mut client_id = s.0.to_string();
-                    let chop_id_at = chunks[1].width - 5;
-                    if chop_id_at > 5 {
-                        client_id.truncate(chop_id_at as usize);
-                    }
-                    Text::styled(client_id, style)
-                });
+                let items: Vec<_> = self
+                    .clients
+                    .iter()
+                    .map(|s| {
+                        let mut client_id = s.0.to_string();
+                        let chop_id_at = chunks[1].width - 5;
+                        if chop_id_at > 5 {
+                            client_id.truncate(chop_id_at as usize);
+                        }
+                        ListItem::new(Text::styled(client_id, style))
+                    })
+                    .collect();
                 let items = List::new(items)
-                    .block(client_block)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title("Client requests (enter to approve, 'n' to deny)"),
+                    )
                     .style(style)
-                    .highlight_style(style.fg(Color::LightGreen).modifier(Modifier::BOLD))
+                    .highlight_style(style.fg(Color::LightGreen).add_modifier(Modifier::BOLD))
                     .highlight_symbol(">");
                 f.render_stateful_widget(items, chunks[1], &mut self.clients_state);
             })?;

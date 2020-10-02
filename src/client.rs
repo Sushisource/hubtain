@@ -209,7 +209,6 @@ async fn read_replies_for(
         }
     })
     .await
-    // Just drop the timeout error - we don't really care
-    .unwrap_or_else(|_| Ok(()))?;
+    .unwrap_or(Ok(()))?;
     Ok(retme)
 }

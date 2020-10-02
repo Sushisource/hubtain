@@ -18,14 +18,14 @@ async-std = { features = ["unstable", "attributes"], version = "1.6" }
 async-trait = "0.1"
 atty = "0.2.14"
 bincode = "1.1"
-colored = "1"
-crossterm = "0.17"
+colored = "2"
+crossterm = "0.18"
 derive_more = "0.99"
 env_logger = "0.7"
 futures = "0.3"
 get_if_addrs = "0.5"
 igd = "0.11"
-indicatif = "0.14"
+indicatif = "0.15"
 lazy_static = "1"
 log = "0.4"
 mnemonic = "1.0.1"
@@ -33,9 +33,9 @@ pin-utils = "0.1"
 rand = "0.7"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-snow = { version = "0.7.0-alpha5", features = ["ring-accelerated"] }
+snow = { version = "0.7.2", features = ["ring-accelerated"] }
 thiserror = "1.0"
-tui = { version =  "0.9", features = ["crossterm"], default_features = false }
+tui = { version =  "0.12", features = ["crossterm"], default_features = false }
 
 [dependencies.clap]
 version = "2"

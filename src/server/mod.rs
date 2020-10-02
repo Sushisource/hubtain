@@ -199,7 +199,17 @@ where
         let local_addr = tcp_sock.local_addr()?;
         info!("TCP listening on {}", local_addr);
         loop {
-            let (mut stream, addr) = tcp_sock.accept().await?;
+            #[cfg(not(test))]
+            if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
+                break Ok(());
+            }
+            let (mut stream, addr) =
+                match io::timeout(Duration::from_millis(100), tcp_sock.accept()).await {
+                    Err(e) if e.kind() == io::ErrorKind::TimedOut => {
+                        continue;
+                    }
+                    r => r?,
+                };
             info!("Accepted download connection from {:?}", &addr);
             // Send the client some info first
             let info = DataSrvInfo {
@@ -309,7 +319,7 @@ fn udp_srv_bind_addr(port_num: u16) -> String {
 #[cfg(target_family = "unix")]
 #[cfg(not(test))]
 fn udp_srv_bind_addr(port_num: u16) -> String {
-    format!("192.168.0.255:{}", port_num)
+    format!("192.168.1.255:{}", port_num)
 }
 
 #[cfg(test)]
