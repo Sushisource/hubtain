@@ -23,10 +23,9 @@ mod progresswriter;
 mod server;
 mod tui;
 
-use crate::server::HolePuncher;
 use crate::{
     client::DownloadClient, filereader::AsyncFileReader, server::FileSrvBuilder,
-    tui::init_console_logger,
+    server::HolePuncher, tui::init_console_logger,
 };
 use anyhow::{anyhow, Error};
 #[cfg(not(test))]
@@ -270,6 +269,6 @@ mod main_test {
             .read_to_end(&mut test_dat)
             .unwrap();
         let content = include_bytes!("../testdata/large.bin");
-        assert!(content.as_ref() == test_dat.as_slice());
+        assert_eq!(content.as_ref(), test_dat.as_slice());
     }
 }

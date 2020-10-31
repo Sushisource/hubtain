@@ -11,9 +11,11 @@ pub use client::ClientEncryptedStreamStarter;
 pub use server::ServerEncryptedStreamStarter;
 
 use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use std::collections::hash_map::DefaultHasher;
-use std::fmt::Debug;
-use std::hash::{Hash, Hasher};
+use std::{
+    collections::hash_map::DefaultHasher,
+    fmt::Debug,
+    hash::{Hash, Hasher},
+};
 use thiserror::Error as DError;
 
 static PATTERN: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";

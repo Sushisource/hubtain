@@ -1,7 +1,6 @@
 use super::*;
 use crate::models::ClientId;
-use futures::io::ErrorKind;
-use futures::{task::Context, AsyncRead, AsyncReadExt, AsyncWrite, FutureExt};
+use futures::{io::ErrorKind, task::Context, AsyncRead, AsyncReadExt, AsyncWrite, FutureExt};
 use snow::TransportState;
 use std::{io, pin::Pin, task::Poll};
 
@@ -29,7 +28,7 @@ where
         info!("Your client id is: {}", ClientId::new(key.public.clone()));
 
         let mut noise = noise.local_private_key(&key.private).build_initiator()?;
-        let mut buf = vec![0u8; 65535];
+        let mut buf = vec![0u8; MAX_CHUNK_SIZE];
         // -> e
         let len = noise.write_message(&[], &mut buf)?;
         send(&mut self.underlying, &buf[..len]).await?;

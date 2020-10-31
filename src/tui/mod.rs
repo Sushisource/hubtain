@@ -53,7 +53,6 @@ impl Log for TuiLogger {
     }
 
     fn log(&self, record: &Record<'_>) {
-        // TODO: Clone? Hmm?
         self.tx
             .clone()
             .try_send(TermMsg::Log(record.args().to_string()))
@@ -83,7 +82,7 @@ impl ClientApprover for TuiApprover {
     }
 }
 
-/// Can be run in it's own thread to forward crossterm events to the TUI
+/// Can be run in its own thread to forward crossterm events to the TUI
 pub fn event_forwarder(mut tx: Sender<TermMsg>) -> crossterm::Result<()> {
     loop {
         #[cfg(not(test))]
