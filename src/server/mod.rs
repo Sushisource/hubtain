@@ -11,6 +11,7 @@ use crate::{
     igd::get_external_addr,
     mnemonic::random_word,
     models::{DataSrvInfo, DiscoveryReply},
+    server::ngrok::get_tunnel,
     tui::{init_console_logger, TuiApprover},
 };
 use anyhow::{anyhow, Context, Error};
@@ -23,7 +24,6 @@ use bincode::serialize;
 use futures::{io::AsyncRead, AsyncWrite};
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
-use crate::server::ngrok::get_tunnel;
 #[cfg(not(test))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -318,16 +318,25 @@ fn udp_srv_bind_addr(port_num: u16) -> String {
     format!("0.0.0.0:{}", port_num)
 }
 
-// TODO: Make work with more than my gateway
 #[cfg(target_family = "unix")]
 #[cfg(not(test))]
-fn udp_srv_bind_addr(port_num: u16) -> String {
-    format!("192.168.1.255:{}", port_num)
+fn udp_srv_bind_addr(port_num: u16) -> Result<String, Error> {
+    use crate::broadcast_addr_picker::find_local_ip;
+
+    let local_ip = find_local_ip()?;
+    // Replace last octet with 255 for broadcast address. Annoyingly, no way to directly mutate
+    // the ip type.
+    let mut octets = local_ip.octets();
+    octets[3] = 255;
+    Ok(format!(
+        "{}.{}.{}.{}:{}",
+        octets[0], octets[1], octets[2], octets[3], port_num
+    ))
 }
 
 #[cfg(test)]
-fn udp_srv_bind_addr(port_num: u16) -> String {
-    format!("127.0.0.1:{}", port_num)
+fn udp_srv_bind_addr(port_num: u16) -> Result<String, Error> {
+    Ok(format!("127.0.0.1:{}", port_num))
 }
 
 impl FileSrvBuilder {
@@ -371,7 +380,7 @@ impl FileSrvBuilder {
     /// Build the file server, binding sockets in the process
     pub async fn build(self) -> Result<FileSrv<AsyncFileReader>, Error> {
         let tcp_sock = TcpListener::bind(format!("{}:0", &self.listen_addr)).await?;
-        let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port)).await?;
+        let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port)?).await?;
         let name = random_word();
         if !self.file_path.is_file() {
             return Err(anyhow!("Provied path is not a file!"));
@@ -406,7 +415,9 @@ pub async fn test_filesrv(
     let tcp_sock = TcpListener::bind(format!("{}:0", "127.0.0.1"))
         .await
         .unwrap();
-    let udp_sock = UdpSocket::bind(udp_srv_bind_addr(0)).await.unwrap();
+    let udp_sock = UdpSocket::bind(udp_srv_bind_addr(0).unwrap())
+        .await
+        .unwrap();
     let name = random_word();
     FileSrv {
         stay_alive: false,
