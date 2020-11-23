@@ -314,11 +314,17 @@ const DEFAULT_TCP_LISTEN_ADDR: &str = "127.0.0.1";
 
 #[cfg(target_family = "windows")]
 #[cfg(not(test))]
-fn udp_srv_bind_addr(port_num: u16) -> String {
+fn udp_srv_bind_addr(port_num: u16) -> Result<String, Error> {
     format!("0.0.0.0:{}", port_num)
 }
 
-#[cfg(target_family = "unix")]
+#[cfg(target_os = "macos")]
+#[cfg(not(test))]
+fn udp_srv_bind_addr(port_num: u16) -> Result<String, Error> {
+    Ok(format!("0.0.0.0:{}", port_num))
+}
+
+#[cfg(target_os = "linux")]
 #[cfg(not(test))]
 fn udp_srv_bind_addr(port_num: u16) -> Result<String, Error> {
     use crate::broadcast_addr_picker::find_local_ip;
@@ -381,6 +387,7 @@ impl FileSrvBuilder {
     pub async fn build(self) -> Result<FileSrv<AsyncFileReader>, Error> {
         let tcp_sock = TcpListener::bind(format!("{}:0", &self.listen_addr)).await?;
         let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port)?).await?;
+        dbg!(&udp_sock);
         let name = random_word();
         if !self.file_path.is_file() {
             return Err(anyhow!("Provied path is not a file!"));
