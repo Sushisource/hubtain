@@ -116,8 +116,8 @@ impl DownloadClient {
             .fuse();
 
         select! {
-            _ = progress_fut => (),
-            _ = download_fut => ()
+            _ = progress_fut => {},
+            _ = download_fut => {}
         };
         drop(download_fut);
 
