@@ -26,7 +26,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --tests
+          args: '--tests --all -- -D warnings'
 
       - name: clean
         uses: actions-rs/cargo@v1
