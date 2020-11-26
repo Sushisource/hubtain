@@ -341,6 +341,7 @@ fn udp_srv_bind_addr(port_num: u16) -> Result<String, Error> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unnecessary_wraps)]
 fn udp_srv_bind_addr(port_num: u16) -> Result<String, Error> {
     Ok(format!("127.0.0.1:{}", port_num))
 }

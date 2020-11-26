@@ -74,7 +74,11 @@ where
         };
 
         let noise = noise.into_transport_mode()?;
-        EncryptedWriteStream::new(self.underlying, noise, their_pubkey)
+        Ok(EncryptedWriteStream::new(
+            self.underlying,
+            noise,
+            their_pubkey,
+        ))
     }
 }
 
@@ -92,12 +96,12 @@ where
         underlying: Pin<&'a mut S>,
         noise: TransportState,
         their_pubkey: Vec<u8>,
-    ) -> Result<Self, EncStreamErr> {
-        Ok(Self {
+    ) -> EncryptedWriteStream<'a, S> {
+        Self {
             underlying,
             noise,
             their_pubkey,
-        })
+        }
     }
 
     pub fn get_client_id(&self) -> ClientId {

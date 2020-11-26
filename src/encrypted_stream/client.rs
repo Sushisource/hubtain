@@ -49,7 +49,7 @@ where
         info!("Approved.");
 
         let noise = noise.into_transport_mode()?;
-        EncryptedReadStream::new(self.underlying, noise)
+        Ok(EncryptedReadStream::new(self.underlying, noise))
     }
 }
 
@@ -62,8 +62,8 @@ impl<'a, S> EncryptedReadStream<'a, S>
 where
     S: AsyncRead,
 {
-    fn new(underlying: Pin<&'a mut S>, noise: TransportState) -> Result<Self, EncStreamErr> {
-        Ok(Self { underlying, noise })
+    fn new(underlying: Pin<&'a mut S>, noise: TransportState) -> EncryptedReadStream<'a, S> {
+        Self { underlying, noise }
     }
 }
 
