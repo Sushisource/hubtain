@@ -25,12 +25,11 @@ use std::{
     io::{self, stdout},
     thread::JoinHandle,
 };
-use tui::text::Span;
 use tui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::Text,
+    text::{Span, Text},
     widgets::{Block, Borders, List, ListItem, ListState},
     Terminal,
 };

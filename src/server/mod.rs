@@ -388,7 +388,6 @@ impl FileSrvBuilder {
     pub async fn build(self) -> Result<FileSrv<AsyncFileReader>, Error> {
         let tcp_sock = TcpListener::bind(format!("{}:0", &self.listen_addr)).await?;
         let udp_sock = UdpSocket::bind(udp_srv_bind_addr(self.udp_port)?).await?;
-        dbg!(&udp_sock);
         let name = random_word();
         if !self.file_path.is_file() {
             return Err(anyhow!("Provied path is not a file!"));
