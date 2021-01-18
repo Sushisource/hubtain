@@ -312,12 +312,14 @@ const DEFAULT_TCP_LISTEN_ADDR: &str = "0.0.0.0";
 #[cfg(test)]
 const DEFAULT_TCP_LISTEN_ADDR: &str = "127.0.0.1";
 
+#[allow(clippy::unnecessary_wraps)]
 #[cfg(target_family = "windows")]
 #[cfg(not(test))]
 fn udp_srv_bind_addr(port_num: u16) -> Result<String, Error> {
     format!("0.0.0.0:{}", port_num)
 }
 
+#[allow(clippy::unnecessary_wraps)]
 #[cfg(target_os = "macos")]
 #[cfg(not(test))]
 fn udp_srv_bind_addr(port_num: u16) -> Result<String, Error> {
