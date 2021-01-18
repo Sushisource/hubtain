@@ -2,11 +2,12 @@ use anyhow::Error;
 use async_std::io::{Read, Write};
 use bincode::{deserialize, serialize};
 use futures::{AsyncReadExt, AsyncWriteExt};
-use serde::{export::Formatter, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::hash_map::DefaultHasher,
     fmt::{self, Debug, Display},
     hash::{Hash, Hasher},
+    fmt::Formatter
 };
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]

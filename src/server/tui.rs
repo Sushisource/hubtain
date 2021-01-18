@@ -22,7 +22,7 @@ use futures::{
 use log::LevelFilter;
 use std::{
     collections::VecDeque,
-    io::{self, stdout, Write},
+    io::{self, stdout},
     thread::JoinHandle,
 };
 use tui::text::Span;
